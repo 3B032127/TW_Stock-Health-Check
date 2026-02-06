@@ -1,12 +1,39 @@
-import React from 'react';
-import { AreaChart, Area, XAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect } from 'react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { Icon } from '../App';
-import { US_YIELD_DATA } from '../constants';
+import { INDICATOR_DETAILS, INDICATOR_CATEGORIES, generateHistoricalData } from '../indicatorDetails';
 
-const SidebarItem = ({ icon, label, sublabel, active = false }: { icon: string; label: string; sublabel?: string; active?: boolean }) => (
-  <div className={`flex items-center gap-3 px-3 py-3 rounded-lg cursor-pointer transition-all group ${active ? 'bg-primary/10 text-primary border border-primary/20 shadow-sm' : 'text-textMuted hover:bg-surfaceLight hover:text-white'}`}>
+interface Indicator {
+  id?: string;
+  name: string;
+  value: string;
+  change: string;
+  isUp: boolean;
+  description?: string;
+  note?: string;
+  text?: string;
+  isPositiveForMarket?: boolean;
+  changePercent?: string;
+}
+
+interface SidebarItemProps {
+  icon: string;
+  label: string;
+  sublabel?: string;
+  active?: boolean;
+  onClick?: () => void;
+}
+
+const SidebarItem: React.FC<SidebarItemProps> = ({ icon, label, sublabel, active = false, onClick }) => (
+  <div
+    onClick={onClick}
+    className={`flex items-center gap-3 px-3 py-3 rounded-lg cursor-pointer transition-all group ${active
+      ? 'bg-primary/10 text-primary border border-primary/20 shadow-sm'
+      : 'text-textMuted hover:bg-surfaceLight hover:text-white'
+      }`}
+  >
     <Icon name={icon} className={`text-[20px] ${active ? 'text-primary' : 'group-hover:text-primary transition-colors'}`} />
-    <div className="flex flex-col">
+    <div className="flex flex-col flex-1">
       <span className="text-sm font-semibold">{label}</span>
       {sublabel && <span className="text-[10px] text-textMuted uppercase">{sublabel}</span>}
     </div>
@@ -15,24 +42,106 @@ const SidebarItem = ({ icon, label, sublabel, active = false }: { icon: string; 
 );
 
 const EconomicIndicators = () => {
+  const [selectedIndicator, setSelectedIndicator] = useState<string>('us_yield');
+  const [indicators, setIndicators] = useState<Indicator[]>([]);
+  const [chartPeriod, setChartPeriod] = useState<string>('1y');
+  const [loading, setLoading] = useState(true);
+
+  // Fetch indicators from API
+  useEffect(() => {
+    const fetchIndicators = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/v1/market/indicators');
+        const result = await response.json();
+
+        if (result.status === 'success' && result.data && result.data.indicators) {
+          setIndicators(result.data.indicators);
+        }
+      } catch (error) {
+        console.error('Error fetching indicators:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchIndicators();
+  }, []);
+
+  // Get current indicator data
+  const currentIndicatorData = indicators.find(ind => ind.id === selectedIndicator);
+  const indicatorDetail = INDICATOR_DETAILS[selectedIndicator];
+
+  // Generate chart data
+  const chartData = React.useMemo(() => {
+    if (!currentIndicatorData || !indicatorDetail) return [];
+
+    // Parse current value (remove non-numeric characters)
+    const numericValue = parseFloat(currentIndicatorData.value.replace(/[^0-9.-]/g, ''));
+    if (isNaN(numericValue)) return [];
+
+    return generateHistoricalData(numericValue, currentIndicatorData.isUp, chartPeriod);
+  }, [currentIndicatorData, indicatorDetail, chartPeriod]);
+
+  // Group indicators by category
+  const groupedIndicators = React.useMemo(() => {
+    const groups: Record<string, Indicator[]> = {};
+
+    indicators.forEach(ind => {
+      if (!ind.id) return;
+      const detail = INDICATOR_DETAILS[ind.id];
+      if (!detail) return;
+
+      const category = detail.category;
+      if (!groups[category]) {
+        groups[category] = [];
+      }
+      groups[category].push(ind);
+    });
+
+    return groups;
+  }, [indicators]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-textMuted">載入中...</div>
+      </div>
+    );
+  }
+
+  if (!indicatorDetail || !currentIndicatorData) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-textMuted">找不到指標資料</div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 animate-fade-in">
       {/* Sidebar */}
       <aside className="w-full lg:w-72 flex-shrink-0 flex flex-col gap-4">
         <div className="hidden lg:flex flex-col gap-1 bg-surface rounded-xl border border-surfaceLight p-3 shadow-sm sticky top-24">
-          <div className="px-3 py-2">
-            <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">全球關鍵數據</h3>
-          </div>
-          <SidebarItem icon="candlestick_chart" label="美國10年期公債殖利率" active={true} />
-          <SidebarItem icon="trending_up" label="消費者物價指數 (CPI)" />
-          <SidebarItem icon="factory" label="製造業 PMI" />
-          <SidebarItem icon="local_shipping" label="台灣外銷訂單" />
-          <SidebarItem icon="attach_money" label="美元指數 (DXY)" />
-          
-          <div className="px-3 py-2 mt-4 border-t border-surfaceLight">
-            <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">我的追蹤</h3>
-          </div>
-          <SidebarItem icon="star" label="重點觀察清單" />
+          {(Object.entries(groupedIndicators) as [string, Indicator[]][]).map(([category, categoryIndicators], idx) => (
+            <React.Fragment key={category}>
+              {idx > 0 && <div className="my-2 border-t border-surfaceLight" />}
+              <div className="px-3 py-2">
+                <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">{category}</h3>
+              </div>
+              {categoryIndicators.map(ind => {
+                const detail = INDICATOR_DETAILS[ind.id!];
+                return (
+                  <SidebarItem
+                    key={ind.id}
+                    icon={detail.icon}
+                    label={ind.name}
+                    active={selectedIndicator === ind.id}
+                    onClick={() => setSelectedIndicator(ind.id!)}
+                  />
+                );
+              })}
+            </React.Fragment>
+          ))}
         </div>
       </aside>
 
@@ -47,31 +156,42 @@ const EconomicIndicators = () => {
         </nav>
 
         <div className="flex flex-col gap-6">
+          {/* Header */}
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">美國10年期公債殖利率 (US 10Y Yield)</h1>
-                <span className="px-2 py-0.5 rounded bg-primary/10 text-primary text-xs font-bold border border-primary/20">USGG10YR</span>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
+                  {indicatorDetail.name} ({indicatorDetail.nameEn})
+                </h1>
+                <span className="px-2 py-0.5 rounded bg-primary/10 text-primary text-xs font-bold border border-primary/20">
+                  {indicatorDetail.code}
+                </span>
               </div>
-              <p className="text-textMuted max-w-2xl">全球資產定價之錨，反映市場對未來經濟與通膨的預期。聯準會貨幣政策的重要觀察指標。</p>
+              <p className="text-textMuted max-w-2xl">{indicatorDetail.description}</p>
             </div>
+
+            {/* Latest Data Card */}
             <div className="flex-shrink-0 bg-surface p-4 rounded-xl shadow-sm border border-surfaceLight flex items-center gap-4">
               <div className="w-10 h-10 rounded-full bg-background flex items-center justify-center border border-surfaceLight">
                 <Icon name="calendar_today" className="text-textMuted" />
               </div>
               <div>
-                <p className="text-xs font-medium text-textMuted">最新數據 (2024-05-20)</p>
+                <p className="text-xs font-medium text-textMuted">最新數據</p>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-white">4.25%</span>
-                  <span className="text-sm font-semibold text-emerald-500 flex items-center gap-0.5">
-                    <Icon name="arrow_upward" className="text-sm" />
-                    0.05%
-                  </span>
+                  <span className="text-2xl font-bold text-white">{currentIndicatorData.value}</span>
+                  {currentIndicatorData.change && (
+                    <span className={`text-sm font-semibold flex items-center gap-0.5 ${currentIndicatorData.isUp ? 'text-up' : 'text-down'
+                      }`}>
+                      <Icon name={currentIndicatorData.isUp ? 'arrow_upward' : 'arrow_downward'} className="text-sm" />
+                      {currentIndicatorData.change}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Chart */}
           <div className="bg-surface rounded-xl shadow-sm border border-surfaceLight overflow-hidden">
             <div className="px-6 py-4 border-b border-surfaceLight flex flex-wrap gap-4 justify-between items-center">
               <div className="flex items-center gap-2">
@@ -79,34 +199,123 @@ const EconomicIndicators = () => {
                 <h2 className="font-semibold text-white">歷史走勢分析</h2>
               </div>
               <div className="flex bg-surfaceLight rounded-lg p-1">
-                <button className="px-3 py-1 text-xs font-medium rounded hover:bg-surface hover:text-white text-textMuted transition-all">1M</button>
-                <button className="px-3 py-1 text-xs font-medium rounded bg-surface text-white shadow-sm transition-all">1Y</button>
-                <button className="px-3 py-1 text-xs font-medium rounded hover:bg-surface hover:text-white text-textMuted transition-all">5Y</button>
-                <button className="px-3 py-1 text-xs font-medium rounded hover:bg-surface hover:text-white text-textMuted transition-all">ALL</button>
+                {[
+                  { label: '1M', value: '1m' },
+                  { label: '1Y', value: '1y' },
+                  { label: '5Y', value: '5y' },
+                ].map(period => (
+                  <button
+                    key={period.value}
+                    onClick={() => setChartPeriod(period.value)}
+                    className={`px-3 py-1 text-xs font-medium rounded transition-all ${chartPeriod === period.value
+                      ? 'bg-surface text-white shadow-sm'
+                      : 'hover:bg-surface hover:text-white text-textMuted'
+                      }`}
+                  >
+                    {period.label}
+                  </button>
+                ))}
               </div>
             </div>
             <div className="p-6 relative h-[400px]">
               <ResponsiveContainer width="100%" height="100%">
-                 <AreaChart data={US_YIELD_DATA}>
-                    <defs>
-                      <linearGradient id="colorYield" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} dy={10} />
-                    <RechartsTooltip 
-                      contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }} 
-                      itemStyle={{ color: '#fff' }}
-                      cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }}
-                    />
-                    <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorYield)" />
-                 </AreaChart>
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id={indicatorDetail.chartGradient} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={indicatorDetail.chartColor} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={indicatorDetail.chartColor} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis
+                    dataKey="date"
+                    stroke="#6b7280"
+                    tick={{ fill: '#9ca3af', fontSize: 11 }}
+                    tickFormatter={(value) => {
+                      // Format based on selected period
+                      if (chartPeriod === '1m') {
+                        // Show month/day (MM/DD)
+                        const parts = value.split('-');
+                        return parts.length >= 3 ? `${parts[1]}/${parts[2]}` : value;
+                      } else if (chartPeriod === '1y') {
+                        // Show year/month (YYYY/MM)
+                        const parts = value.split('-');
+                        return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : value;
+                      } else {
+                        // 5y: Show year (YYYY)
+                        const parts = value.split('-');
+                        return parts.length >= 1 ? parts[0] : value;
+                      }
+                    }}
+                    interval="preserveStartEnd"
+                    minTickGap={50}
+                  />
+                  <YAxis
+                    stroke="#6b7280"
+                    tick={{ fill: '#9ca3af', fontSize: 11 }}
+                    domain={['auto', 'auto']}
+                    hide
+                  />
+                  <RechartsTooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const value = payload[0].value as number;
+                        const date = payload[0].payload.date;
+
+                        // Format value based on indicator type
+                        let formattedValue: string;
+                        if (selectedIndicator === 'usdtwd') {
+                          // USD/TWD: 2 decimal places
+                          formattedValue = value.toFixed(2);
+                        } else if (selectedIndicator === 'us_yield' || selectedIndicator === 'fed_rate') {
+                          // Yields and rates: 2 decimal places with %
+                          formattedValue = value.toFixed(2) + '%';
+                        } else if (selectedIndicator === 'us_cpi' || selectedIndicator === 'us_ppi') {
+                          // CPI/PPI: 1 decimal place with %
+                          formattedValue = value.toFixed(1) + '%';
+                        } else if (selectedIndicator === 'sox') {
+                          // SOX index: no decimals
+                          formattedValue = value.toFixed(0);
+                        } else if (selectedIndicator === 'monitor_light') {
+                          // Monitor light: 1 decimal (score)
+                          formattedValue = value.toFixed(1) + ' 分';
+                        } else if (selectedIndicator === 'tsmc_outlook') {
+                          // TSMC outlook: 1 decimal (score)
+                          formattedValue = value.toFixed(1) + '/10';
+                        } else {
+                          // Default: 2 decimals
+                          formattedValue = value.toFixed(2);
+                        }
+
+                        // Format date
+                        const formattedDate = date.split('-').slice(1).join('/');
+
+                        return (
+                          <div className="bg-surface border border-surfaceLight rounded-lg px-3 py-2 shadow-lg">
+                            <p className="text-textMuted text-xs mb-1">{formattedDate}</p>
+                            <p className="text-white font-bold text-sm">{formattedValue}</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                    cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke={indicatorDetail.chartColor}
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill={`url(#${indicatorDetail.chartGradient})`}
+                  />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>
 
+          {/* Info Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Introduction */}
             <div className="bg-surface rounded-xl shadow-sm border border-surfaceLight p-6 h-full transition-all hover:border-blue-900/50">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-400">
@@ -117,16 +326,13 @@ const EconomicIndicators = () => {
                   <p className="text-[10px] uppercase font-bold text-textMuted tracking-wider">Indicator Intro</p>
                 </div>
               </div>
-              <div className="space-y-4">
-                <p className="text-sm leading-relaxed text-textMuted">
-                  美國10年期公債殖利率（US 10-Year Treasury Yield）被廣泛視為全球金融市場的<span className="font-bold text-white">「無風險利率」(Risk-free Rate)</span>。它是投資者在評估其他資產（如股票、公司債、房地產）時的重要參考基準。
-                </p>
-                <p className="text-sm leading-relaxed text-textMuted">
-                  當殖利率上升時，代表市場對未來的通膨預期升高或聯準會（Fed）可能採取緊縮貨幣政策；反之，殖利率下降通常暗示經濟放緩或資金湧入避險資產。
-                </p>
-              </div>
+              <div
+                className="space-y-4 text-sm leading-relaxed text-textMuted"
+                dangerouslySetInnerHTML={{ __html: indicatorDetail.introduction }}
+              />
             </div>
 
+            {/* Analysis */}
             <div className="bg-surface rounded-xl shadow-sm border border-surfaceLight p-6 h-full transition-all hover:border-amber-900/50">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400">
@@ -140,21 +346,21 @@ const EconomicIndicators = () => {
               <div className="space-y-4">
                 <div className="p-3 bg-surfaceLight/50 rounded-lg">
                   <p className="text-sm text-textMuted">
-                    <strong className="text-white block mb-1">估值模型影響 (DCF)</strong>
-                    10年期公債殖利率常作為股票折現模型中的分母。當殖利率上升，未來現金流的折現價值下降，這對高本益比的成長股（如科技股）衝擊最大。
+                    <strong className="text-white block mb-1">{indicatorDetail.analysis.title}</strong>
+                    {indicatorDetail.analysis.content}
                   </p>
                 </div>
                 <ul className="space-y-2 text-sm">
                   <li className="flex gap-2">
-                    <Icon name="trending_down" className="text-emerald-500 text-lg" />
+                    <Icon name="trending_up" className="text-emerald-500 text-lg flex-shrink-0" />
                     <span className="text-textMuted">
-                      <span className="font-medium text-emerald-400">殖利率下行：</span> 有利於股市估值修復，特別是科技類股。
+                      <span className="font-medium text-emerald-400">利多：</span> {indicatorDetail.analysis.positive}
                     </span>
                   </li>
                   <li className="flex gap-2">
-                    <Icon name="trending_up" className="text-rose-500 text-lg" />
+                    <Icon name="trending_down" className="text-rose-500 text-lg flex-shrink-0" />
                     <span className="text-textMuted">
-                      <span className="font-medium text-rose-400">殖利率飆升：</span> 資金成本變貴，企業獲利承壓，資金可能流出股市轉向債市。
+                      <span className="font-medium text-rose-400">利空：</span> {indicatorDetail.analysis.negative}
                     </span>
                   </li>
                 </ul>
