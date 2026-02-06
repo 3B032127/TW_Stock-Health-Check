@@ -3,6 +3,7 @@ import { ViewState } from './types';
 import Dashboard from './pages/Dashboard';
 import StockDetail from './pages/StockDetail';
 import EconomicIndicators from './pages/EconomicIndicators';
+import ApiTesting from './pages/ApiTesting';
 
 // --- Icons Component Helper ---
 export const Icon = ({ name, className = "" }: { name: string; className?: string }) => (
@@ -11,12 +12,12 @@ export const Icon = ({ name, className = "" }: { name: string; className?: strin
 
 // --- Layout Components ---
 
-const Header = ({ 
-  currentView, 
-  onChangeView 
-}: { 
-  currentView: ViewState; 
-  onChangeView: (view: ViewState) => void; 
+const Header = ({
+  currentView,
+  onChangeView
+}: {
+  currentView: ViewState;
+  onChangeView: (view: ViewState) => void;
 }) => {
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b border-surfaceLight bg-background/80 backdrop-blur-md px-4 py-3 lg:px-6">
@@ -32,9 +33,9 @@ const Header = ({
       <div className="flex-1 max-w-md px-4 hidden sm:block">
         <div className="flex w-full items-center rounded-lg bg-surfaceLight border border-transparent focus-within:border-primary/50 transition-colors h-10 px-3">
           <Icon name="search" className="text-textMuted text-[20px]" />
-          <input 
-            type="text" 
-            placeholder="搜尋股票代碼或名稱 (例如: 2330)" 
+          <input
+            type="text"
+            placeholder="搜尋股票代碼或名稱 (例如: 2330)"
             className="w-full bg-transparent border-none text-sm text-white placeholder-textMuted focus:ring-0 ml-2"
           />
         </div>
@@ -42,17 +43,23 @@ const Header = ({
 
       <nav className="flex items-center gap-6">
         <div className="hidden md:flex items-center gap-6">
-          <button 
+          <button
             onClick={() => onChangeView(ViewState.DASHBOARD)}
             className={`text-sm font-medium transition-colors ${currentView === ViewState.DASHBOARD ? 'text-primary' : 'text-textMuted hover:text-white'}`}
           >
             市場概況
           </button>
-          <button 
+          <button
             onClick={() => onChangeView(ViewState.ECONOMIC_INDICATORS)}
             className={`text-sm font-medium transition-colors ${currentView === ViewState.ECONOMIC_INDICATORS ? 'text-primary' : 'text-textMuted hover:text-white'}`}
           >
             經濟指標
+          </button>
+          <button
+            onClick={() => onChangeView(ViewState.API_TESTING)}
+            className={`text-sm font-medium transition-colors ${currentView === ViewState.API_TESTING ? 'text-primary' : 'text-textMuted hover:text-white'}`}
+          >
+            API測試
           </button>
           <button className="text-sm font-medium text-textMuted hover:text-white transition-colors">
             自選追蹤
@@ -80,17 +87,21 @@ const App = () => {
   // Function to navigate to stock detail (simulated navigation)
   const navigateToStock = (stockId: string) => {
     setCurrentView(ViewState.STOCK_DETAIL);
-    window.scrollTo(0,0);
+    window.scrollTo(0, 0);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-textMain font-sans">
       <Header currentView={currentView} onChangeView={setCurrentView} />
-      
-      <main className="flex-1 w-full max-w-[1400px] mx-auto p-4 lg:p-6">
+
+      <main className={`flex-1 w-full ${currentView === ViewState.API_TESTING
+          ? ''
+          : 'max-w-[1400px] mx-auto p-4 lg:p-6'
+        }`}>
         {currentView === ViewState.DASHBOARD && <Dashboard onNavigateToStock={navigateToStock} />}
         {currentView === ViewState.STOCK_DETAIL && <StockDetail />}
         {currentView === ViewState.ECONOMIC_INDICATORS && <EconomicIndicators />}
+        {currentView === ViewState.API_TESTING && <ApiTesting />}
       </main>
 
       <Footer />
