@@ -37,6 +37,7 @@ interface Indicator {
   description?: string;
   note?: string;
   text?: string;
+  isPositiveForMarket?: boolean;
 }
 
 interface SparklineProps {
@@ -59,20 +60,82 @@ interface IndicatorCardProps {
   value: string;
   change: string;
   isUp: boolean;
+  description?: string;
+  note?: string;
+  text?: string;
+  isPositiveForMarket?: boolean;
 }
 
-const IndicatorCard: React.FC<IndicatorCardProps> = ({ title, value, change, isUp }) => (
-  <div className="flex flex-col p-5 rounded-xl border border-surfaceLight bg-surface hover:border-slate-600 transition-colors">
-    <p className="text-textMuted text-sm font-medium">{title}</p>
-    <div className="flex items-end justify-between mt-2">
-      <p className="text-2xl font-bold">{value}</p>
-      <div className={`flex items-center text-sm font-bold ${isUp ? 'text-up' : 'text-down'}`}>
-        <Icon name={isUp ? 'arrow_upward' : 'arrow_downward'} className="text-[16px] mr-0.5" />
-        {change}
+const IndicatorCard: React.FC<IndicatorCardProps> = ({
+  title,
+  value,
+  change,
+  isUp,
+  description,
+  note,
+  text,
+  isPositiveForMarket
+}) => {
+  // Generate mock trend data (5 points)
+  const trendData = React.useMemo(() => {
+    const baseValue = 50;
+    const trend = isUp ? 1 : -1;
+    return Array.from({ length: 5 }, (_, i) => ({
+      value: baseValue + (i * 3 * trend) + (Math.random() * 2 - 1)
+    }));
+  }, [isUp]);
+
+  return (
+    <div className="flex flex-col p-5 rounded-xl border border-surfaceLight bg-surface hover:border-slate-600 transition-colors">
+      {/* Header with title and mini chart */}
+      <div className="flex items-start justify-between mb-2">
+        <p className="text-textMuted text-sm font-medium flex-1">{title}</p>
+        <div className="ml-2">
+          <Sparkline data={trendData} color={isUp ? '#ef4444' : '#10b981'} />
+        </div>
       </div>
+
+      {/* Value and change */}
+      <div className="flex items-end justify-between mb-3">
+        <p className="text-2xl font-bold">{value}</p>
+        <div className={`flex items-center text-sm font-bold ${isUp ? 'text-up' : 'text-down'}`}>
+          <Icon name={isUp ? 'arrow_upward' : 'arrow_downward'} className="text-[16px] mr-0.5" />
+          {change}
+        </div>
+      </div>
+
+      {/* Additional metadata */}
+      {(description || note || text || isPositiveForMarket !== undefined) && (
+        <div className="pt-3 border-t border-surfaceLight/50 space-y-2">
+          {description && (
+            <div className="flex items-start gap-2 text-xs text-textMuted">
+              <span className="text-sm">📊</span>
+              <span className="flex-1">{description}</span>
+            </div>
+          )}
+          {note && (
+            <div className="flex items-start gap-2 text-xs text-primary">
+              <span className="text-sm">💡</span>
+              <span className="flex-1">{note}</span>
+            </div>
+          )}
+          {text && (
+            <div className="flex items-start gap-2 text-xs text-yellow-400 italic">
+              <span className="text-sm">✨</span>
+              <span className="flex-1">{text}</span>
+            </div>
+          )}
+          {isPositiveForMarket !== undefined && (
+            <div className={`flex items-center gap-2 text-xs font-semibold ${isPositiveForMarket ? 'text-up' : 'text-down'}`}>
+              <span className="text-sm">{isPositiveForMarket ? '📈' : '📉'}</span>
+              <span>{isPositiveForMarket ? '利多' : '利空'}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 interface StockTableProps {
   title: string;
@@ -291,15 +354,43 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
           <h2 className="text-xl font-bold text-white">關鍵經濟指標</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {indicators.map((ind, i) => (
-            <IndicatorCard
-              key={ind.id || i}
-              title={ind.name}
-              value={ind.value}
-              change={ind.change}
-              isUp={ind.isUp}
-            />
-          ))}
+          {indicators
+            .filter(ind => ind.id !== 'TAIEX' && !ind.name.includes('加權指數'))
+            .sort((a, b) => {
+              // Define category order
+              const categoryOrder: Record<string, number> = {
+                // Taiwan market indicators
+                'usdtwd': 1,
+                'monitor_light': 2,
+                // Semiconductor related
+                'sox': 3,
+                'tsmc_outlook': 4,
+                // US market indicators
+                'us_yield': 5,
+                'fed_rate': 6,
+                // US economic data
+                'us_cpi': 7,
+                'us_ppi': 8,
+              };
+
+              const orderA = categoryOrder[a.id || ''] || 999;
+              const orderB = categoryOrder[b.id || ''] || 999;
+
+              return orderA - orderB;
+            })
+            .map((ind, i) => (
+              <IndicatorCard
+                key={ind.id || i}
+                title={ind.name}
+                value={ind.value}
+                change={ind.change}
+                isUp={ind.isUp}
+                description={ind.description}
+                note={ind.note}
+                text={ind.text}
+                isPositiveForMarket={ind.isPositiveForMarket}
+              />
+            ))}
         </div>
       </div>
 
