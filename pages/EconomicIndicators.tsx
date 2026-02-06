@@ -133,19 +133,26 @@ const EconomicIndicators = () => {
       {/* Sidebar */}
       <aside className="w-full lg:w-72 flex-shrink-0 flex flex-col gap-4">
         <div className="hidden lg:flex flex-col gap-1 bg-surface rounded-xl border border-surfaceLight p-3 shadow-sm sticky top-24">
-          <div className="px-3 py-2">
-            <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">全球關鍵數據</h3>
-          </div>
-
-          {Object.values(INDICATOR_DETAILS).map((detail) => (
-            <SidebarItem
-              key={detail.id}
-              icon={detail.icon}
-              label={detail.name}
-              sublabel={detail.code}
-              active={selectedIndicator === detail.id}
-              onClick={() => handleIndicatorClick(detail.id)}
-            />
+          {Object.values(INDICATOR_CATEGORIES).map((category) => (
+            <div key={category} className="mb-2 last:mb-0">
+              <div className="px-3 py-2">
+                <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">{category}</h3>
+              </div>
+              <div className="flex flex-col gap-1">
+                {Object.values(INDICATOR_DETAILS)
+                  .filter(detail => detail.category === category)
+                  .map((detail) => (
+                    <SidebarItem
+                      key={detail.id}
+                      icon={detail.icon}
+                      label={detail.name}
+                      sublabel={detail.code}
+                      active={selectedIndicator === detail.id}
+                      onClick={() => handleIndicatorClick(detail.id)}
+                    />
+                  ))}
+              </div>
+            </div>
           ))}
         </div>
       </aside>
@@ -260,7 +267,7 @@ const EconomicIndicators = () => {
                           const data = payload[0].payload;
                           const formattedValue = selectedIndicator === 'monitor_light'
                             ? `${data.value.toFixed(0)}分`
-                            : data.value.toFixed(2);
+                            : `${data.value.toFixed(2)}${indicatorDetail.unit || ''}`;
                           const date = data.date;
                           const signal = data.signal;
 

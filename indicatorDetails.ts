@@ -21,6 +21,7 @@ export interface IndicatorDetail {
     };
     chartColor: string;
     chartGradient: string;
+    unit: string;
 }
 
 export const INDICATOR_CATEGORIES = {
@@ -50,6 +51,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         },
         chartColor: '#3b82f6',
         chartGradient: 'colorUsdTwd',
+        unit: '',
     },
 
     monitor_light: {
@@ -99,6 +101,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         },
         chartColor: '#10b981',
         chartGradient: 'colorMonitor',
+        unit: '分',
     },
 
     sox: {
@@ -120,6 +123,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         },
         chartColor: '#8b5cf6',
         chartGradient: 'colorSox',
+        unit: '點',
     },
 
     tsmc_outlook: {
@@ -141,6 +145,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         },
         chartColor: '#f97316',
         chartGradient: 'colorTsmc',
+        unit: '/10',
     },
 
     us_yield: {
@@ -162,6 +167,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         },
         chartColor: '#3b82f6',
         chartGradient: 'colorYield',
+        unit: '%',
     },
 
     fed_rate: {
@@ -183,6 +189,7 @@ Fed利率的變動會<span class="font-bold text-white">直接影響全球資金
         },
         chartColor: '#ef4444',
         chartGradient: 'colorFed',
+        unit: '%',
     },
 
     us_cpi: {
@@ -204,6 +211,7 @@ Fed設定的通膨目標為2%，當CPI持續高於此目標時，Fed可能採取
         },
         chartColor: '#eab308',
         chartGradient: 'colorCpi',
+        unit: '%',
     },
 
     us_ppi: {
@@ -225,6 +233,7 @@ PPI通常領先CPI 1-2個月，因為生產者的成本上漲最終會轉嫁給�
         },
         chartColor: '#06b6d4',
         chartGradient: 'colorPpi',
+        unit: '%',
     },
 };
 
