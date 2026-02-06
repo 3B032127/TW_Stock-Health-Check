@@ -1,8 +1,43 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { Icon } from '../App';
 import { MARKET_INDEX_DATA, INDICATORS, TOP_GAINERS, TOP_LOSERS } from '../constants';
 import { Stock } from '../types';
+
+// API Response Interfaces
+interface TaixDataPoint {
+  date: string;
+  close: number;
+  volume: number;
+}
+
+interface TaixCurrentData {
+  price: number;
+  change: number;
+  changePercent: number;
+  date: string;
+  volume: number;
+  high: number;
+  low: number;
+  open: number;
+}
+
+interface TaixData {
+  current: TaixCurrentData;
+  history: TaixDataPoint[];
+  period: string;
+}
+
+interface Indicator {
+  id?: string;
+  name: string;
+  value: string;
+  change: string;
+  isUp: boolean;
+  description?: string;
+  note?: string;
+  text?: string;
+}
 
 interface SparklineProps {
   data: any[];
@@ -11,11 +46,11 @@ interface SparklineProps {
 
 const Sparkline: React.FC<SparklineProps> = ({ data, color }) => (
   <div className="h-10 w-24">
-     <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data}>
-          <Area type="monotone" dataKey="value" stroke={color} fill="transparent" strokeWidth={2} />
-        </AreaChart>
-     </ResponsiveContainer>
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data}>
+        <Area type="monotone" dataKey="value" stroke={color} fill="transparent" strokeWidth={2} />
+      </AreaChart>
+    </ResponsiveContainer>
   </div>
 );
 
@@ -75,8 +110,8 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
           </thead>
           <tbody className="text-sm">
             {stocks.map((stock) => (
-              <tr 
-                key={stock.id} 
+              <tr
+                key={stock.id}
                 onClick={() => onNavigate(stock.id)}
                 className="border-b border-surfaceLight hover:bg-surfaceLight/30 transition-colors cursor-pointer last:border-0"
               >
@@ -101,6 +136,55 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
 };
 
 const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => void }) => {
+  // State management
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('1d');
+  const [taixData, setTaixData] = useState<TaixData | null>(null);
+  const [indicators, setIndicators] = useState<Indicator[]>([]);
+  const [indexData, setIndexData] = useState<{ date: string, value: number }[]>([]);
+
+  // Fetch TAIEX data
+  useEffect(() => {
+    const fetchTaixData = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/v1/market/taiex?period=${selectedPeriod}`);
+        const result = await response.json();
+
+        if (result.status === 'success' && result.data) {
+          setTaixData(result.data);
+
+          // Map history to chart data format
+          const chartData = result.data.history.map((item: TaixDataPoint) => ({
+            date: item.date,
+            value: item.close
+          }));
+          setIndexData(chartData);
+        }
+      } catch (error) {
+        console.error('Error fetching TAIEX data:', error);
+      }
+    };
+
+    fetchTaixData();
+  }, [selectedPeriod]);
+
+  // Fetch market indicators
+  useEffect(() => {
+    const fetchIndicators = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/v1/market/indicators');
+        const result = await response.json();
+
+        if (result.status === 'success' && result.data && result.data.indicators) {
+          setIndicators(result.data.indicators);
+        }
+      } catch (error) {
+        console.error('Error fetching indicators:', error);
+      }
+    };
+
+    fetchIndicators();
+  }, []);
+
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Index Section */}
@@ -113,61 +197,88 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
             </div>
             <div>
               <div className="flex items-baseline gap-3">
-                <span className="text-4xl lg:text-5xl font-bold tracking-tight text-up">17,650.32</span>
+                <span className={`text-4xl lg:text-5xl font-bold tracking-tight ${taixData && taixData.current.change >= 0 ? 'text-up' : 'text-down'}`}>
+                  {taixData ? taixData.current.price.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'}
+                </span>
               </div>
               <div className="flex items-center gap-2 mt-2">
-                <span className="flex items-center text-up bg-up/10 px-2 py-1 rounded text-sm font-bold border border-up/20">
-                  <Icon name="arrow_upward" className="text-[16px] mr-1" />
-                  +120.45 (+0.69%)
-                </span>
-                <span className="text-textMuted text-sm">今日</span>
+                {taixData && (
+                  <span className={`flex items-center ${taixData.current.change >= 0 ? 'text-up bg-up/10 border-up/20' : 'text-down bg-down/10 border-down/20'} px-2 py-1 rounded text-sm font-bold border`}>
+                    <Icon name={taixData.current.change >= 0 ? 'arrow_upward' : 'arrow_downward'} className="text-[16px] mr-1" />
+                    {taixData.current.change >= 0 ? '+' : ''}{taixData.current.change.toFixed(2)} ({taixData.current.change >= 0 ? '+' : ''}{taixData.current.changePercent.toFixed(2)}%)
+                  </span>
+                )}
+                <span className="text-textMuted text-sm">{taixData ? taixData.current.date : '今日'}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4 mt-2">
               <div>
                 <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">成交量</p>
-                <p className="text-lg font-bold text-white">2,854 億</p>
+                <p className="text-lg font-bold text-white">
+                  {taixData && taixData.current.volume > 0
+                    ? `${(taixData.current.volume / 100000000).toFixed(0)} 億`
+                    : 'N/A'}
+                </p>
               </div>
               <div>
                 <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">當日區間</p>
-                <p className="text-lg font-bold text-white">17,580 - 17,685</p>
+                <p className="text-lg font-bold text-white">
+                  {taixData ? `${taixData.current.low.toLocaleString()} - ${taixData.current.high.toLocaleString()}` : '--'}
+                </p>
               </div>
             </div>
           </div>
-          
+
           <div className="flex-1 p-6 relative min-h-[300px] flex flex-col">
             <div className="flex justify-end gap-2 mb-4">
-               {['1日', '1週', '1月', '1年'].map((period, idx) => (
-                 <button key={period} className={`px-3 py-1 text-xs font-bold rounded-full transition-all ${idx === 1 ? 'bg-primary text-white shadow-sm' : 'bg-surfaceLight text-textMuted hover:bg-slate-600 hover:text-white'}`}>
-                   {period}
-                 </button>
-               ))}
+              {[{ label: '1日', value: '1d' }, { label: '1週', value: '1w' }, { label: '1月', value: '1m' }, { label: '1年', value: '1y' }].map((period) => (
+                <button
+                  key={period.value}
+                  onClick={() => setSelectedPeriod(period.value)}
+                  className={`px-3 py-1 text-xs font-bold rounded-full transition-all ${selectedPeriod === period.value ? 'bg-primary text-white shadow-sm' : 'bg-surfaceLight text-textMuted hover:bg-slate-600 hover:text-white'}`}
+                >
+                  {period.label}
+                </button>
+              ))}
             </div>
             <div className="flex-1 w-full relative">
-               <ResponsiveContainer width="100%" height="100%">
-                 <AreaChart data={MARKET_INDEX_DATA}>
-                    <defs>
-                      <linearGradient id="colorIndex" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }} 
-                      itemStyle={{ color: '#fff' }}
-                      labelStyle={{ display: 'none' }}
-                    />
-                    <Area type="monotone" dataKey="value" stroke="#ef4444" fillOpacity={1} fill="url(#colorIndex)" strokeWidth={3} />
-                 </AreaChart>
-               </ResponsiveContainer>
-            </div>
-            <div className="flex justify-between text-xs text-textMuted mt-2 font-mono px-2">
-              <span>09:00</span>
-              <span>10:00</span>
-              <span>11:00</span>
-              <span>12:00</span>
-              <span>13:00</span>
-              <span>13:30</span>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={indexData}>
+                  <defs>
+                    <linearGradient id="colorIndexUp" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorIndexDown" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-surface border border-surfaceLight rounded-lg px-3 py-2 shadow-lg">
+                            <p className="text-textMuted text-xs mb-1">{payload[0].payload.date}</p>
+                            <p className="text-white font-bold text-sm">
+                              {payload[0].value.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke={taixData && taixData.current.change >= 0 ? '#ef4444' : '#22c55e'}
+                    fillOpacity={1}
+                    fill={taixData && taixData.current.change >= 0 ? 'url(#colorIndexUp)' : 'url(#colorIndexDown)'}
+                    strokeWidth={2.5}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
         </div>
@@ -180,8 +291,14 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
           <h2 className="text-xl font-bold text-white">關鍵經濟指標</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {INDICATORS.map((ind, i) => (
-             <IndicatorCard key={i} title={ind.name} value={ind.value} change={ind.change} isUp={ind.isUp} />
+          {indicators.map((ind, i) => (
+            <IndicatorCard
+              key={ind.id || i}
+              title={ind.name}
+              value={ind.value}
+              change={ind.change}
+              isUp={ind.isUp}
+            />
           ))}
         </div>
       </div>
@@ -191,7 +308,7 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
         <StockTable title="漲幅排行榜" stocks={TOP_GAINERS} type="gainer" onNavigate={onNavigateToStock} />
         <StockTable title="跌幅排行榜" stocks={TOP_LOSERS} type="loser" onNavigate={onNavigateToStock} />
       </div>
-    </div>
+    </div >
   );
 };
 

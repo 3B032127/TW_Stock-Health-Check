@@ -1,0 +1,21 @@
+{
+    "cpi": {
+        "value": 3.4,
+        "date": "2026-01",
+        "yoy_change": 3.4,
+        "description": "消費者物價指數年增率"
+    },
+    "ppi": {
+        "value": 3.0,
+        "date": "2026-01",
+        "yoy_change": 3.0,
+        "description": "生產者物價指數年增率"
+    },
+    "fed_rate": {
+        "value": 4.50,
+        "date": "2026-01",
+        "range": "4.25-4.50",
+        "description": "聯邦基金利率目標區間"
+    },
+    "last_updated": "2026-02-06"
+}
