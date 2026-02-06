@@ -83,10 +83,17 @@ const Footer = () => (
 
 const App = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
+  const [selectedEconomicIndicatorId, setSelectedEconomicIndicatorId] = useState<string | undefined>(undefined);
 
   // Function to navigate to stock detail (simulated navigation)
   const navigateToStock = (stockId: string) => {
     setCurrentView(ViewState.STOCK_DETAIL);
+    window.scrollTo(0, 0);
+  };
+
+  const navigateToIndicator = (id: string) => {
+    setSelectedEconomicIndicatorId(id);
+    setCurrentView(ViewState.ECONOMIC_INDICATORS);
     window.scrollTo(0, 0);
   };
 
@@ -95,12 +102,22 @@ const App = () => {
       <Header currentView={currentView} onChangeView={setCurrentView} />
 
       <main className={`flex-1 w-full ${currentView === ViewState.API_TESTING
-          ? ''
-          : 'max-w-[1400px] mx-auto p-4 lg:p-6'
+        ? ''
+        : 'max-w-[1400px] mx-auto p-4 lg:p-6'
         }`}>
-        {currentView === ViewState.DASHBOARD && <Dashboard onNavigateToStock={navigateToStock} />}
+        {currentView === ViewState.DASHBOARD && (
+          <Dashboard
+            onNavigateToStock={navigateToStock}
+            onNavigateToIndicator={navigateToIndicator}
+          />
+        )}
         {currentView === ViewState.STOCK_DETAIL && <StockDetail />}
-        {currentView === ViewState.ECONOMIC_INDICATORS && <EconomicIndicators />}
+        {currentView === ViewState.ECONOMIC_INDICATORS && (
+          <EconomicIndicators
+            initialIndicatorId={selectedEconomicIndicatorId}
+            onNavigateHome={() => setCurrentView(ViewState.DASHBOARD)}
+          />
+        )}
         {currentView === ViewState.API_TESTING && <ApiTesting />}
       </main>
 

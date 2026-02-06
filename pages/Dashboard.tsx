@@ -65,6 +65,7 @@ interface IndicatorCardProps {
   note?: string;
   text?: string;
   isPositiveForMarket?: boolean;
+  onClick?: () => void;
 }
 
 const IndicatorCard: React.FC<IndicatorCardProps> = ({
@@ -75,7 +76,8 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
   description,
   note,
   text,
-  isPositiveForMarket
+  isPositiveForMarket,
+  onClick
 }) => {
   // Generate mock trend data (5 points)
   const trendData = React.useMemo(() => {
@@ -87,7 +89,10 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
   }, [isUp]);
 
   return (
-    <div className="flex flex-col p-5 rounded-xl border border-surfaceLight bg-surface hover:border-slate-600 transition-colors">
+    <div
+      onClick={onClick}
+      className={`flex flex-col p-5 rounded-xl border border-surfaceLight bg-surface transition-all ${onClick ? 'cursor-pointer hover:border-primary/50 hover:shadow-md' : 'hover:border-slate-600'}`}
+    >
       {/* Header with title and mini chart */}
       <div className="flex items-start justify-between mb-2">
         <p className="text-textMuted text-sm font-medium flex-1">{title}</p>
@@ -199,7 +204,7 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
   );
 };
 
-const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => void }) => {
+const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToStock: (id: string) => void, onNavigateToIndicator?: (id: string) => void }) => {
   // State management
   const [selectedPeriod, setSelectedPeriod] = useState<string>('1d');
   const [taixData, setTaixData] = useState<TaixData | null>(null);
@@ -445,6 +450,7 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
                 note={ind.note}
                 text={ind.text}
                 isPositiveForMarket={ind.isPositiveForMarket}
+                onClick={() => ind.id && onNavigateToIndicator?.(ind.id)}
               />
             ))}
         </div>

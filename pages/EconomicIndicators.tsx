@@ -42,12 +42,24 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ icon, label, sublabel, active
   </div>
 );
 
-const EconomicIndicators = () => {
-  const [selectedIndicator, setSelectedIndicator] = useState<string>('usdtwd');
+interface EconomicIndicatorsProps {
+  initialIndicatorId?: string;
+  onNavigateHome?: () => void;
+}
+
+const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicatorId, onNavigateHome }) => {
+  const [selectedIndicator, setSelectedIndicator] = useState<string>(initialIndicatorId || 'usdtwd');
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [chartPeriod, setChartPeriod] = useState<string>('1y');
   const [loading, setLoading] = useState(true);
   const [monitorLightData, setMonitorLightData] = useState<MonitorLightData[]>([]);
+
+  // Update selected indicator when prop changes
+  useEffect(() => {
+    if (initialIndicatorId) {
+      setSelectedIndicator(initialIndicatorId);
+    }
+  }, [initialIndicatorId]);
 
   // Fetch indicators from API and merge with monitor light data
   useEffect(() => {
@@ -160,9 +172,12 @@ const EconomicIndicators = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col gap-6 min-w-0">
         <nav className="flex items-center gap-2 text-sm text-textMuted">
-          <span className="hover:text-primary transition-colors cursor-pointer">首頁</span>
-          <Icon name="chevron_right" className="text-xs" />
-          <span className="hover:text-primary transition-colors cursor-pointer">基本面分析</span>
+          <span
+            className="hover:text-primary transition-colors cursor-pointer"
+            onClick={onNavigateHome}
+          >
+            首頁
+          </span>
           <Icon name="chevron_right" className="text-xs" />
           <span className="font-medium text-white">全球經濟指標</span>
         </nav>
