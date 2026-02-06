@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { Icon } from '../App';
 import { MARKET_INDEX_DATA, INDICATORS, TOP_GAINERS, TOP_LOSERS } from '../constants';
+import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { Stock } from '../types';
 
 // API Response Interfaces
@@ -237,8 +238,31 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
         const response = await fetch('http://localhost:8000/api/v1/market/indicators');
         const result = await response.json();
 
+        let apiIndicators: Indicator[] = [];
         if (result.status === 'success' && result.data && result.data.indicators) {
-          setIndicators(result.data.indicators);
+          apiIndicators = result.data.indicators;
+        }
+
+        // Load monitor light from CSV
+        const monitorData = await loadMonitorLightData();
+        const latestMonitor = getLatestMonitorData(monitorData);
+
+        if (latestMonitor) {
+          const monitorIndicator: Indicator = {
+            id: 'monitor_light',
+            name: '景氣對策信號',
+            value: `${latestMonitor.score.toFixed(0)}分`,
+            change: `${latestMonitor.signal}燈`,
+            isUp: latestMonitor.score >= 23,
+            description: latestMonitor.score >= 32 ? '景氣轉熱' : latestMonitor.score >= 23 ? '景氣穩定' : '景氣轉冷',
+          };
+
+          // Merge monitor light with API indicators
+          // Filter out existing monitor_light from API to avoid duplicates
+          const filteredApi = apiIndicators.filter(ind => ind.id !== 'monitor_light');
+          setIndicators([...filteredApi, monitorIndicator]);
+        } else {
+          setIndicators(apiIndicators);
         }
       } catch (error) {
         console.error('Error fetching indicators:', error);

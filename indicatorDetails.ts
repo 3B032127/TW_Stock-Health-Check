@@ -60,9 +60,37 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         icon: 'traffic',
         category: INDICATOR_CATEGORIES.TAIWAN,
         description: '國發會發布的景氣綜合判斷指標，以燈號顏色反映經濟景氣狀況。',
-        introduction: `景氣對策信號由國家發展委員會每月發布，綜合9項經濟指標編製而成，以<span class="font-bold text-white">五種燈號</span>（紅、黃紅、綠、黃藍、藍）反映當前景氣狀況。
+        introduction: `景氣對策信號由國家發展委員會每月發布，綜合9項經濟指標編製而成，以<span class="font-bold text-white">五種燈號</span>反映當前景氣狀況。
 
-分數範圍從0到45分，其中23-31分為綠燈（穩定），32-37分為黃紅燈（轉熱），38分以上為紅燈（過熱），17-22分為黃藍燈（轉冷），16分以下為藍燈（衰退）。`,
+<div class="my-4 space-y-2">
+  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(239, 68, 68, 0.1);">
+    <div class="w-4 h-4 rounded-full" style="background-color: #ef4444;"></div>
+    <span class="font-bold text-white">紅燈 (38-45分)</span>
+    <span class="text-textMuted">景氣過熱</span>
+  </div>
+  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(249, 115, 22, 0.1);">
+    <div class="w-4 h-4 rounded-full" style="background-color: #f97316;"></div>
+    <span class="font-bold text-white">黃紅燈 (32-37分)</span>
+    <span class="text-textMuted">景氣轉向熱絡</span>
+  </div>
+  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(16, 185, 129, 0.1);">
+    <div class="w-4 h-4 rounded-full" style="background-color: #10b981;"></div>
+    <span class="font-bold text-white">綠燈 (23-31分)</span>
+    <span class="text-textMuted">景氣穩定</span>
+  </div>
+  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(6, 182, 212, 0.1);">
+    <div class="w-4 h-4 rounded-full" style="background-color: #06b6d4;"></div>
+    <span class="font-bold text-white">黃藍燈 (17-22分)</span>
+    <span class="text-textMuted">景氣轉向低迷</span>
+  </div>
+  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(59, 130, 246, 0.1);">
+    <div class="w-4 h-4 rounded-full" style="background-color: #3b82f6;"></div>
+    <span class="font-bold text-white">藍燈 (9-16分)</span>
+    <span class="text-textMuted">景氣低迷</span>
+  </div>
+</div>
+
+綜合判斷分數由貨幣總計數M1B、股價指數、工業生產指數等9項指標加權計算而得，是觀察台灣總體經濟的重要先行指標。`,
         analysis: {
             title: '景氣燈號的投資意義',
             content: '景氣對策信號是觀察台灣總體經濟的重要先行指標，對股市中長期走勢具有參考價值。',
