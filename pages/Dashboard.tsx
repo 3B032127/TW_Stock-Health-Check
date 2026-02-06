@@ -285,8 +285,8 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
               </div>
               <div>
                 <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">當日區間</p>
-                <p className="text-lg font-bold text-white">
-                  {taixData ? `${taixData.current.low.toLocaleString()} - ${taixData.current.high.toLocaleString()}` : '--'}
+                <p className="text-lg font-bold text-white whitespace-nowrap">
+                  {taixData ? `${taixData.current.low.toLocaleString('zh-TW', { maximumFractionDigits: 0 })} - ${taixData.current.high.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}` : '--'}
                 </p>
               </div>
             </div>
@@ -317,6 +317,38 @@ const Dashboard = ({ onNavigateToStock }: { onNavigateToStock: (id: string) => v
                       <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
                     </linearGradient>
                   </defs>
+                  <XAxis
+                    dataKey="date"
+                    stroke="#6b7280"
+                    tick={{ fill: '#9ca3af', fontSize: 11 }}
+                    tickFormatter={(value) => {
+                      // Format based on selected period
+                      if (selectedPeriod === '1d') {
+                        // Show time only (HH:MM)
+                        return value.split(' ')[1] || value;
+                      } else if (selectedPeriod === '1w') {
+                        // Show month/day (MM/DD)
+                        const parts = value.split('-');
+                        return parts.length >= 3 ? `${parts[1]}/${parts[2].split(' ')[0]}` : value;
+                      } else if (selectedPeriod === '1m') {
+                        // Show month/day (MM/DD)
+                        const parts = value.split('-');
+                        return parts.length >= 3 ? `${parts[1]}/${parts[2]}` : value;
+                      } else {
+                        // 1y: Show year/month (YYYY/MM)
+                        const parts = value.split('-');
+                        return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : value;
+                      }
+                    }}
+                    interval="preserveStartEnd"
+                    minTickGap={50}
+                  />
+                  <YAxis
+                    stroke="#6b7280"
+                    tick={{ fill: '#9ca3af', fontSize: 11 }}
+                    domain={['auto', 'auto']}
+                    hide
+                  />
                   <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
