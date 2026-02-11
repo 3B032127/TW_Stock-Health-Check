@@ -6,6 +6,8 @@ export interface Stock {
   changePercent: number;
   volume: string;
   marketCap?: string;
+  isLimitUp?: boolean;
+  isLimitDown?: boolean;
 }
 
 export interface Indicator {

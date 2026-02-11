@@ -189,7 +189,15 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
                   <p className="font-bold text-white">{stock.name}</p>
                   <p className="text-xs text-textMuted">{stock.id}</p>
                 </td>
-                <td className="py-3 px-5 text-right font-medium text-white">{stock.price.toFixed(2)}</td>
+                <td className="py-3 px-5 text-right font-medium">
+                  <span className={`
+                    ${stock.isLimitUp ? 'bg-up/20 border border-up/40 px-2 py-1 rounded font-bold text-up' : ''}
+                    ${stock.isLimitDown ? 'bg-down/20 border border-down/40 px-2 py-1 rounded font-bold text-down' : ''}
+                    ${!stock.isLimitUp && !stock.isLimitDown ? 'text-white' : ''}
+                  `}>
+                    {stock.price.toFixed(2)}
+                  </span>
+                </td>
                 <td className={`py-3 px-5 text-right font-bold ${colorClass}`}>
                   {isGainer ? '+' : ''}{stock.changePercent.toFixed(2)}%
                 </td>

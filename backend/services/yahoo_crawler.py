@@ -123,12 +123,18 @@ class YahooStockCrawler:
             # 從 Yahoo TW 股市頁面獲取中文公司名稱
             stock_name = await self._get_chinese_stock_name(stock_id)
             
+            # 檢測漲停和跌停（台股一般為±10%，使用9.8%作為閾值）
+            is_limit_up = change_percent >= 9.8
+            is_limit_down = change_percent <= -9.8
+            
             return {
                 'id': stock_id,
                 'name': stock_name or f'股票{stock_id}',
                 'price': round(float(current_price), 2),
                 'change': round(float(change), 2),
-                'changePercent': round(float(change_percent), 2)
+                'changePercent': round(float(change_percent), 2),
+                'isLimitUp': is_limit_up,
+                'isLimitDown': is_limit_down
             }
             
         except Exception as e:
