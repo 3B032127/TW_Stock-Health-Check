@@ -70,5 +70,33 @@ class FinMindClient:
             print(f"Error fetching economics {indicator}: {e}")
         return []
 
+    async def fetch_stock_info(self, stock_id: str = ""):
+        """
+        獲取台股股票基本資料
+        
+        Args:
+            stock_id: 股票代碼，如果為空則返回所有股票
+            
+        Returns:
+            股票基本資料列表
+        """
+        params = {
+            "dataset": "TaiwanStockInfo",
+            "token": self.token
+        }
+        
+        if stock_id:
+            params["data_id"] = stock_id
+        
+        try:
+            response = await self.client.get(FINMIND_API_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+            if data["msg"] == "success":
+                return data["data"]
+        except Exception as e:
+            print(f"Error fetching stock info for {stock_id}: {e}")
+        return []
+
     async def close(self):
         await self.client.aclose()

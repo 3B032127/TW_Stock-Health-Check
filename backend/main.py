@@ -16,11 +16,7 @@ app = FastAPI(
 # Add CORS middleware to allow requests from frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "null"  # Allow file:// protocol
-    ],
+    allow_origins=["*"],  # 允許所有來源
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -208,3 +204,56 @@ def read_taiex_data(period: str = Query(default="1m", pattern="^(1d|1w|1m|1y)$")
         "data": data
     }
 
+
+@app.get("/api/v1/market/rankings/gainers")
+async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50)):
+    """
+    獲取上市漲幅排行榜
+    
+    Args:
+        limit: 要返回的股票數量（預設10，最多50）
+    
+    Returns:
+        漲幅排行榜股票列表
+    """
+    from .services.yahoo_crawler import YahooStockCrawler
+    
+    crawler = YahooStockCrawler()
+    try:
+        rankings = await crawler.get_top_gainers(limit)
+        return {
+            "status": "success",
+            "source": "yahoo+finmind",
+            "data": {
+                "rankings": rankings
+            }
+        }
+    finally:
+        await crawler.close()
+
+
+@app.get("/api/v1/market/rankings/losers")
+async def read_top_losers(limit: int = Query(default=10, ge=1, le=50)):
+    """
+    獲取上市跌幅排行榜
+    
+    Args:
+        limit: 要返回的股票數量（預設10，最多50）
+    
+    Returns:
+        跌幅排行榜股票列表
+    """
+    from .services.yahoo_crawler import YahooStockCrawler
+    
+    crawler = YahooStockCrawler()
+    try:
+        rankings = await crawler.get_top_losers(limit)
+        return {
+            "status": "success",
+            "source": "yahoo+finmind",
+            "data": {
+                "rankings": rankings
+            }
+        }
+    finally:
+        await crawler.close()

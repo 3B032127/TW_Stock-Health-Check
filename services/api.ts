@@ -81,5 +81,19 @@ export const api = {
         const response = await fetch(`${API_BASE_URL}/market/taiex?period=${period}`);
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
+    },
+
+    // Stock Rankings
+    getTopGainers: async (limit: number = 10) => {
+        const response = await fetch(`${API_BASE_URL}/market/rankings/gainers?limit=${limit}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
+    getTopLosers: async (limit: number = 10) => {
+        const response = await fetch(`${API_BASE_URL}/market/rankings/losers?limit=${limit}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
     }
 };
+

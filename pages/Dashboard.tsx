@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { Icon } from '../App';
-import { MARKET_INDEX_DATA, INDICATORS, TOP_GAINERS, TOP_LOSERS } from '../constants';
+import { MARKET_INDEX_DATA, INDICATORS } from '../constants';
 import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { Stock } from '../types';
+import { api } from '../services/api';
 
 // API Response Interfaces
 interface TaixDataPoint {
@@ -210,6 +211,9 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
   const [taixData, setTaixData] = useState<TaixData | null>(null);
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [indexData, setIndexData] = useState<{ date: string, value: number }[]>([]);
+  const [topGainers, setTopGainers] = useState<Stock[]>([]);
+  const [topLosers, setTopLosers] = useState<Stock[]>([]);
+
 
   // Fetch TAIEX data
   useEffect(() => {
@@ -275,6 +279,31 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
     };
 
     fetchIndicators();
+  }, []);
+
+  // Fetch stock rankings
+  useEffect(() => {
+    const fetchRankings = async () => {
+      try {
+        // Fetch top 10 gainers and losers
+        const [gainersResult, losersResult] = await Promise.all([
+          api.getTopGainers(10),
+          api.getTopLosers(10)
+        ]);
+
+        if (gainersResult.status === 'success' && gainersResult.data.rankings) {
+          setTopGainers(gainersResult.data.rankings);
+        }
+
+        if (losersResult.status === 'success' && losersResult.data.rankings) {
+          setTopLosers(losersResult.data.rankings);
+        }
+      } catch (error) {
+        console.error('Error fetching rankings:', error);
+      }
+    };
+
+    fetchRankings();
   }, []);
 
   return (
@@ -458,8 +487,8 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
 
       {/* Rankings Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <StockTable title="漲幅排行榜" stocks={TOP_GAINERS} type="gainer" onNavigate={onNavigateToStock} />
-        <StockTable title="跌幅排行榜" stocks={TOP_LOSERS} type="loser" onNavigate={onNavigateToStock} />
+        <StockTable title="漲幅排行榜" stocks={topGainers.slice(0, 5)} type="gainer" onNavigate={onNavigateToStock} />
+        <StockTable title="跌幅排行榜" stocks={topLosers.slice(0, 5)} type="loser" onNavigate={onNavigateToStock} />
       </div>
     </div >
   );

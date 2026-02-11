@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 測試 - 漲跌幅排行榜</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        h1 { color: #3b82f6; }
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+        }
+        th {
+            background: #333;
+            color: #3b82f6;
+        }
+        .up { color: #ef4444; }
+        .down { color: #10b981; }
+        .error {
+            color: #ef4444;
+            padding: 10px;
+            background: #3a1a1a;
+            border-radius: 4px;
+        }
+        .loading {
+            color: #fbbf24;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <h1>漲跌幅排行榜 API 測試</h1>
+    
+    <div class="section">
+        <h2>API 設定</h2>
+        <p>API Base URL: <strong id="apiUrl">http://localhost:8000/api/v1</strong></p>
+        <button onclick="testConnection()">測試連接</button>
+        <button onclick="fetchRankings()">重新載入排行榜</button>
+        <div id="connectionStatus"></div>
+    </div>
+
+    <div class="section">
+        <h2>漲幅排行榜</h2>
+        <div id="gainersStatus" class="loading">載入中...</div>
+        <table id="gainersTable">
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>股票代碼</th>
+                    <th>股票名稱</th>
+                    <th>成交價</th>
+                    <th>漲跌</th>
+                    <th>漲跌幅</th>
+                </tr>
+            </thead>
+            <tbody id="gainersBody"></tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>跌幅排行榜</h2>
+        <div id="losersStatus" class="loading">載入中...</div>
+        <table id="losersTable">
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>股票代碼</th>
+                    <th>股票名稱</th>
+                    <th>成交價</th>
+                    <th>漲跌</th>
+                    <th>漲跌幅</th>
+                </tr>
+            </thead>
+            <tbody id="losersBody"></tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>原始 JSON 響應</h2>
+        <h3>漲幅排行</h3>
+        <pre id="gainersJson" style="background: #1a1a1a; padding: 10px; border-radius: 4px; overflow-x: auto;"></pre>
+        <h3>跌幅排行</h3>
+        <pre id="losersJson" style="background: #1a1a1a; padding: 10px; border-radius: 4px; overflow-x: auto;"></pre>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8000/api/v1';
+
+        async function testConnection() {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.innerHTML = '<p class="loading">測試連接中...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL.replace('/api/v1', '')}/`);
+                const data = await response.json();
+                statusDiv.innerHTML = `<p style="color: #10b981;">✓ 連接成功！${JSON.stringify(data)}</p>`;
+            } catch (error) {
+                statusDiv.innerHTML = `<p class="error">✗ 連接失敗：${error.message}</p>`;
+            }
+        }
+
+        async function fetchGainers() {
+            const statusDiv = document.getElementById('gainersStatus');
+            const tbody = document.getElementById('gainersBody');
+            const jsonPre = document.getElementById('gainersJson');
+            
+            try {
+                statusDiv.innerHTML = '<p class="loading">載入中...</p>';
+                const response = await fetch(`${API_BASE_URL}/market/rankings/gainers?limit=10`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                jsonPre.textContent = JSON.stringify(result, null, 2);
+                
+                if (result.status === 'success' && result.data.rankings) {
+                    const rankings = result.data.rankings;
+                    statusDiv.innerHTML = `<p style="color: #10b981;">✓ 成功載入 ${rankings.length} 支股票</p>`;
+                    
+                    tbody.innerHTML = rankings.map((stock, index) => `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${stock.id}</td>
+                            <td>${stock.name}</td>
+                            <td>${stock.price.toFixed(2)}</td>
+                            <td class="up">+${stock.change.toFixed(2)}</td>
+                            <td class="up">+${stock.changePercent.toFixed(2)}%</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    throw new Error('Invalid response format');
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<p class="error">✗ 載入失敗：${error.message}</p>`;
+                jsonPre.textContent = error.stack;
+            }
+        }
+
+        async function fetchLosers() {
+            const statusDiv = document.getElementById('losersStatus');
+            const tbody = document.getElementById('losersBody');
+            const jsonPre = document.getElementById('losersJson');
+            
+            try {
+                statusDiv.innerHTML = '<p class="loading">載入中...</p>';
+                const response = await fetch(`${API_BASE_URL}/market/rankings/losers?limit=10`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                jsonPre.textContent = JSON.stringify(result, null, 2);
+                
+                if (result.status === 'success' && result.data.rankings) {
+                    const rankings = result.data.rankings;
+                    statusDiv.innerHTML = `<p style="color: #10b981;">✓ 成功載入 ${rankings.length} 支股票</p>`;
+                    
+                    tbody.innerHTML = rankings.map((stock, index) => `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${stock.id}</td>
+                            <td>${stock.name}</td>
+                            <td>${stock.price.toFixed(2)}</td>
+                            <td class="down">${stock.change.toFixed(2)}</td>
+                            <td class="down">${stock.changePercent.toFixed(2)}%</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    throw new Error('Invalid response format');
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<p class="error">✗ 載入失敗：${error.message}</p>`;
+                jsonPre.textContent = error.stack;
+            }
+        }
+
+        async function fetchRankings() {
+            await Promise.all([fetchGainers(), fetchLosers()]);
+        }
+
+        // 頁面載入時自動獲取數據
+        window.addEventListener('load', fetchRankings);
+    </script>
+</body>
+</html>
