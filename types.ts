@@ -38,6 +38,7 @@ export enum ViewState {
 
 export enum ApiTestingTab {
   MARKET_INDICATORS = 'MARKET_INDICATORS',
+  RANKINGS = 'RANKINGS',
   STOCK_FINANCIALS = 'STOCK_FINANCIALS'
 }
 

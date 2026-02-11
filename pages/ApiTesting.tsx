@@ -17,8 +17,8 @@ const ApiTesting = () => {
                     <button
                         onClick={() => setActiveTab(ApiTestingTab.MARKET_INDICATORS)}
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${activeTab === ApiTestingTab.MARKET_INDICATORS
-                                ? 'bg-primary/10 text-primary border border-primary/30'
-                                : 'text-textMuted hover:text-white hover:bg-surfaceLight border border-transparent'
+                            ? 'bg-primary/10 text-primary border border-primary/30'
+                            : 'text-textMuted hover:text-white hover:bg-surfaceLight border border-transparent'
                             }`}
                     >
                         <Icon name="monitoring" className="text-[20px]" />
@@ -26,10 +26,21 @@ const ApiTesting = () => {
                     </button>
 
                     <button
+                        onClick={() => setActiveTab(ApiTestingTab.RANKINGS)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${activeTab === ApiTestingTab.RANKINGS
+                            ? 'bg-primary/10 text-primary border border-primary/30'
+                            : 'text-textMuted hover:text-white hover:bg-surfaceLight border border-transparent'
+                            }`}
+                    >
+                        <Icon name="trending_up" className="text-[20px]" />
+                        <span>漲跌幅排行榜</span>
+                    </button>
+
+                    <button
                         onClick={() => setActiveTab(ApiTestingTab.STOCK_FINANCIALS)}
                         className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${activeTab === ApiTestingTab.STOCK_FINANCIALS
-                                ? 'bg-primary/10 text-primary border border-primary/30'
-                                : 'text-textMuted hover:text-white hover:bg-surfaceLight border border-transparent'
+                            ? 'bg-primary/10 text-primary border border-primary/30'
+                            : 'text-textMuted hover:text-white hover:bg-surfaceLight border border-transparent'
                             }`}
                     >
                         <Icon name="account_balance" className="text-[20px]" />
@@ -47,6 +58,20 @@ const ApiTesting = () => {
                                 src="/test_indicators.html"
                                 className="w-full border-0"
                                 title="台股市場指標 API 測試"
+                                style={{
+                                    height: '2000px',
+                                    display: 'block'
+                                }}
+                            />
+                        </div>
+                    )}
+
+                    {activeTab === ApiTestingTab.RANKINGS && (
+                        <div className="w-full">
+                            <iframe
+                                src="/test_rankings.html"
+                                className="w-full border-0"
+                                title="漲跌幅排行榜 API 測試"
                                 style={{
                                     height: '2000px',
                                     display: 'block'

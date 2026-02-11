@@ -17,9 +17,8 @@ class YahooStockCrawler:
             headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
-            timeout=30.0
+            timeout=60.0  # 增加超時時間以適應中文名稱抓取
         )
-        self.finmind_client = FinMindClient()
     
     async def scrape_ranking_page(self, url: str, limit: int = 10) -> List[str]:
         """
@@ -55,10 +54,12 @@ class YahooStockCrawler:
                 rows = soup.select('li[class*="List"] a[href*="/quote/"]')
                 for row in rows[:limit]:
                     href = row.get('href', '')
-                    # 從 URL 中提取股票代碼 (例如: /quote/2330.TW)
+                    # 從 URL 中提取股票代碼 (例如: /quote/2330.TW 或 https://tw.stock.yahoo.com/quote/2330.TW)
                     if '/quote/' in href:
+                        # 處理絕對和相對 URL
                         code = href.split('/quote/')[-1].split('.')[0].strip()
-                        if code and code.isdigit() and code not in stock_codes:
+                        # 只接受4位數字的股票代碼
+                        if code and code.isdigit() and len(code) == 4 and code not in stock_codes:
                             stock_codes.append(code)
             
             # 方法3: 嘗試從其他可能的結構中提取
@@ -83,7 +84,7 @@ class YahooStockCrawler:
     
     async def get_stock_details(self, stock_id: str) -> Optional[Dict]:
         """
-        使用 FinMind API 獲取股票詳細資訊
+        使用 yfinance 獲取股票價格資訊，並從 Yahoo TW 網頁獲取中文公司名稱
         
         Args:
             stock_id: 股票代碼
@@ -92,47 +93,51 @@ class YahooStockCrawler:
             包含股票資訊的字典，或 None
         """
         try:
-            # 獲取最近2天的股價資料（確保能取得最新資料）
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            import yfinance as yf
             
-            # 從 FinMind 獲取股價資料
-            price_data = await self.finmind_client.fetch_price(stock_id, start_date, end_date)
+            # 建立 ticker（台股需要加 .TW 後綴）
+            ticker_symbol = f"{stock_id}.TW"
+            ticker = yf.Ticker(ticker_symbol)
             
-            if not price_data or len(price_data) == 0:
-                print(f"無法獲取股票 {stock_id} 的價格資料")
-                return None
+            # 獲取股票資訊
+            info = ticker.info
             
-            # 取得最新的兩筆資料來計算漲跌
-            latest = price_data[-1]
-            previous = price_data[-2] if len(price_data) > 1 else latest
+            # 獲取當前價格和前一日收盤價
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
+            previous_close = info.get('previousClose', current_price)
             
-            # 計算漲跌幅
-            current_price = float(latest.get('close', 0))
-            previous_price = float(previous.get('close', current_price))
+            # 如果沒有 currentPrice，嘗試從 history 獲取最新價格
+            if not current_price or current_price == 0:
+                hist = ticker.history(period='2d')
+                if not hist.empty:
+                    current_price = float(hist['Close'].iloc[-1])
+                    if len(hist) > 1:
+                        previous_close = float(hist['Close'].iloc[-2])
+                    else:
+                        previous_close = current_price
             
-            change = current_price - previous_price
-            change_percent = (change / previous_price * 100) if previous_price > 0 else 0
+            # 計算漲跌
+            change = current_price - previous_close
+            change_percent = (change / previous_close * 100) if previous_close > 0 else 0
             
-            # 獲取股票名稱（從 FinMind 的股票資訊 API）
-            # 注意：FinMind 的價格資料中沒有股票名稱，我們需要另外獲取
-            stock_name = await self._get_stock_name(stock_id)
+            # 從 Yahoo TW 股市頁面獲取中文公司名稱
+            stock_name = await self._get_chinese_stock_name(stock_id)
             
             return {
                 'id': stock_id,
                 'name': stock_name or f'股票{stock_id}',
-                'price': round(current_price, 2),
-                'change': round(change, 2),
-                'changePercent': round(change_percent, 2)
+                'price': round(float(current_price), 2),
+                'change': round(float(change), 2),
+                'changePercent': round(float(change_percent), 2)
             }
             
         except Exception as e:
             print(f"獲取股票 {stock_id} 詳細資訊失敗: {e}")
             return None
     
-    async def _get_stock_name(self, stock_id: str) -> Optional[str]:
+    async def _get_chinese_stock_name(self, stock_id: str) -> Optional[str]:
         """
-        從 FinMind API 獲取股票中文名稱
+        從 Yahoo TW 股市個股頁面獲取中文公司名稱
         
         Args:
             stock_id: 股票代碼
@@ -141,19 +146,35 @@ class YahooStockCrawler:
             股票中文名稱
         """
         try:
-            # 使用 FinMind 的 TaiwanStockInfo API 獲取股票基本資料
-            stock_info = await self.finmind_client.fetch_stock_info(stock_id)
+            url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW"
+            response = await self.client.get(url)
+            response.raise_for_status()
             
-            if stock_info and len(stock_info) > 0:
-                # FinMind 返回的資料中，stock_name 欄位包含股票名稱
-                stock_name = stock_info[0].get('stock_name', '')
-                if stock_name:
-                    return stock_name
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 方法1: 從 og:title meta 標籤提取（例如: "台積電(2330.TW) 走勢圖 - Yahoo股市"）
+            og_title = soup.find('meta', property='og:title')
+            if og_title:
+                content = og_title.get('content', '')
+                # 提取括號前的公司名稱
+                if '(' in content:
+                    name = content.split('(')[0].strip()
+                    if name and name != 'Yahoo股市':
+                        return name
+            
+            # 方法2: 從 title 標籤提取
+            title = soup.find('title')
+            if title:
+                content = title.get_text(strip=True)
+                if '(' in content:
+                    name = content.split('(')[0].strip()
+                    if name and name != 'Yahoo股市':
+                        return name
             
             return None
             
         except Exception as e:
-            print(f"獲取股票 {stock_id} 名稱失敗: {e}")
+            print(f"獲取股票 {stock_id} 中文名稱失敗: {e}")
             return None
     
     async def get_top_gainers(self, limit: int = 10) -> List[Dict]:
@@ -209,4 +230,3 @@ class YahooStockCrawler:
     async def close(self):
         """關閉 HTTP 客戶端"""
         await self.client.aclose()
-        await self.finmind_client.close()
