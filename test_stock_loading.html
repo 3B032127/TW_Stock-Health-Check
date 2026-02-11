@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockLoading Component Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        background: '#101622',
+                        surface: '#1a2332',
+                        surfaceLight: '#2a3544',
+                        primary: '#3b82f6',
+                        textMuted: '#9ca3af',
+                        up: '#ef4444',
+                        down: '#10b981'
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.5.0/dist/Recharts.js"></script>
+</head>
+
+<body class="bg-background min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { LineChart, Line, ResponsiveContainer } = Recharts;
+
+        const StockLoading = ({ text = "獲取最新股市資料中..." }) => {
+            // Initialize chart data with 30 points starting at price 100
+            const [chartData, setChartData] = useState(() =>
+                Array.from({ length: 30 }, (_, i) => ({
+                    time: Date.now() - (30 - i) * 100,
+                    price: 100
+                }))
+            );
+
+            const [subtitle, setSubtitle] = useState("正在連線至證券交易所...");
+
+            const subtitles = [
+                "正在連線至證券交易所...",
+                "計算技術指標中...",
+                "同步市場數據...",
+                "分析即時報價..."
+            ];
+
+            // Random walk effect - updates every 100ms
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setChartData(prev => {
+                        const lastPrice = prev[prev.length - 1]?.price || 100;
+
+                        // Random volatility: ±3
+                        const volatility = (Math.random() - 0.5) * 6;
+                        let newPrice = lastPrice + volatility;
+
+                        // Keep price within bounds (50-150)
+                        newPrice = Math.max(50, Math.min(150, newPrice));
+
+                        // Remove oldest point, add new point (sliding window)
+                        const newData = [
+                            ...prev.slice(1),
+                            {
+                                time: Date.now(),
+                                price: newPrice
+                            }
+                        ];
+
+                        return newData;
+                    });
+                }, 100);
+
+                return () => clearInterval(interval);
+            }, []);
+
+            // Subtitle rotation - changes every 3 seconds
+            useEffect(() => {
+                let index = 0;
+                const interval = setInterval(() => {
+                    index = (index + 1) % subtitles.length;
+                    setSubtitle(subtitles[index]);
+                }, 3000);
+
+                return () => clearInterval(interval);
+            }, []);
+
+            // Determine trend color (Taiwan stock rules: red = up, green = down)
+            const startPrice = chartData[0]?.price || 100;
+            const latestPrice = chartData[chartData.length - 1]?.price || 100;
+            const isUpTrend = latestPrice >= startPrice;
+            const lineColor = isUpTrend ? '#ef4444' : '#10b981'; // Red : Green
+
+            return (
+                <div className="fixed inset-0 bg-background flex flex-col items-center justify-center z-50">
+                    {/* Chart Container */}
+                    <div className="w-full max-w-2xl h-64 mb-8 relative">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                <defs>
+                                    {/* Glow effect using SVG filter */}
+                                    <filter id="glow">
+                                        <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+                                        <feMerge>
+                                            <feMergeNode in="coloredBlur" />
+                                            <feMergeNode in="SourceGraphic" />
+                                        </feMerge>
+                                    </filter>
+                                </defs>
+
+                                <Line
+                                    type="monotone"
+                                    dataKey="price"
+                                    stroke={lineColor}
+                                    strokeWidth={3}
+                                    dot={false}
+                                    isAnimationActive={false}
+                                    filter="url(#glow)"
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
+
+                        {/* Additional glow layer using CSS (for extra effect) */}
+                        <div
+                            className="absolute inset-0 pointer-events-none"
+                            style={{
+                                background: `radial-gradient(ellipse at center, ${lineColor}15 0%, transparent 70%)`,
+                            }}
+                        />
+                    </div>
+
+                    {/* Main Text with Breathing Animation */}
+                    <div className="text-center space-y-3">
+                        <h2 className="text-2xl font-bold text-white animate-pulse">
+                            {text}
+                        </h2>
+
+                        {/* Subtitle with Dot Animation */}
+                        <div className="flex items-center justify-center space-x-2">
+                            <div
+                                className="w-2 h-2 rounded-full animate-pulse"
+                                style={{ backgroundColor: lineColor }}
+                            />
+                            <p className="text-sm text-textMuted uppercase tracking-wider">
+                                {subtitle}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Optional: Status Indicators */}
+                    <div className="mt-12 flex items-center space-x-6 text-xs text-textMuted">
+                        <div className="flex items-center space-x-2">
+                            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                            <span>History Data</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
+                            <span>Model Inference</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: lineColor, animationDelay: '0.6s' }} />
+                            <span>Trend Detection</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Render the component
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<StockLoading />);
+    </script>
+</body>
+
+</html>

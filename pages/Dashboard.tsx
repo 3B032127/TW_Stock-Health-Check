@@ -5,6 +5,7 @@ import { MARKET_INDEX_DATA, INDICATORS } from '../constants';
 import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { Stock } from '../types';
 import { api } from '../services/api';
+import StockLoading from '../components/StockLoading';
 
 // API Response Interfaces
 interface TaixDataPoint {
@@ -221,6 +222,7 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
   const [indexData, setIndexData] = useState<{ date: string, value: number }[]>([]);
   const [topGainers, setTopGainers] = useState<Stock[]>([]);
   const [topLosers, setTopLosers] = useState<Stock[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
 
   // Fetch TAIEX data
@@ -248,71 +250,85 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
     fetchTaixData();
   }, [selectedPeriod]);
 
-  // Fetch market indicators
+  // Combined initial data loading - waits for all data to complete
   useEffect(() => {
-    const fetchIndicators = async () => {
+    const loadAllData = async () => {
+      setIsLoading(true);
+
       try {
-        const response = await fetch('http://localhost:8000/api/v1/market/indicators');
-        const result = await response.json();
+        // Fetch all data in parallel
+        await Promise.all([
+          // Fetch indicators
+          (async () => {
+            try {
+              const response = await fetch('http://localhost:8000/api/v1/market/indicators');
+              const result = await response.json();
 
-        let apiIndicators: Indicator[] = [];
-        if (result.status === 'success' && result.data && result.data.indicators) {
-          apiIndicators = result.data.indicators;
-        }
+              let apiIndicators: Indicator[] = [];
+              if (result.status === 'success' && result.data && result.data.indicators) {
+                apiIndicators = result.data.indicators;
+              }
 
-        // Load monitor light from CSV
-        const monitorData = await loadMonitorLightData();
-        const latestMonitor = getLatestMonitorData(monitorData);
+              // Load monitor light from CSV
+              const monitorData = await loadMonitorLightData();
+              const latestMonitor = getLatestMonitorData(monitorData);
 
-        if (latestMonitor) {
-          const monitorIndicator: Indicator = {
-            id: 'monitor_light',
-            name: '景氣對策信號',
-            value: `${latestMonitor.score.toFixed(0)}分`,
-            change: `${latestMonitor.signal}燈`,
-            isUp: latestMonitor.score >= 23,
-            description: latestMonitor.score >= 32 ? '景氣轉熱' : latestMonitor.score >= 23 ? '景氣穩定' : '景氣轉冷',
-          };
+              if (latestMonitor) {
+                const monitorIndicator: Indicator = {
+                  id: 'monitor_light',
+                  name: '景氣對策信號',
+                  value: `${latestMonitor.score.toFixed(0)}分`,
+                  change: `${latestMonitor.signal}燈`,
+                  isUp: latestMonitor.score >= 23,
+                  description: latestMonitor.score >= 32 ? '景氣轉熱' : latestMonitor.score >= 23 ? '景氣穩定' : '景氣轉冷',
+                };
 
-          // Merge monitor light with API indicators
-          // Filter out existing monitor_light from API to avoid duplicates
-          const filteredApi = apiIndicators.filter(ind => ind.id !== 'monitor_light');
-          setIndicators([...filteredApi, monitorIndicator]);
-        } else {
-          setIndicators(apiIndicators);
-        }
-      } catch (error) {
-        console.error('Error fetching indicators:', error);
-      }
-    };
+                const filteredApi = apiIndicators.filter(ind => ind.id !== 'monitor_light');
+                setIndicators([...filteredApi, monitorIndicator]);
+              } else {
+                setIndicators(apiIndicators);
+              }
+            } catch (error) {
+              console.error('Error fetching indicators:', error);
+            }
+          })(),
 
-    fetchIndicators();
-  }, []);
+          // Fetch rankings
+          (async () => {
+            try {
+              const [gainersResult, losersResult] = await Promise.all([
+                api.getTopGainers(10),
+                api.getTopLosers(10)
+              ]);
 
-  // Fetch stock rankings
-  useEffect(() => {
-    const fetchRankings = async () => {
-      try {
-        // Fetch top 10 gainers and losers
-        const [gainersResult, losersResult] = await Promise.all([
-          api.getTopGainers(10),
-          api.getTopLosers(10)
+              if (gainersResult.status === 'success' && gainersResult.data.rankings) {
+                setTopGainers(gainersResult.data.rankings);
+              }
+
+              if (losersResult.status === 'success' && losersResult.data.rankings) {
+                setTopLosers(losersResult.data.rankings);
+              }
+            } catch (error) {
+              console.error('Error fetching rankings:', error);
+            }
+          })()
         ]);
 
-        if (gainersResult.status === 'success' && gainersResult.data.rankings) {
-          setTopGainers(gainersResult.data.rankings);
-        }
-
-        if (losersResult.status === 'success' && losersResult.data.rankings) {
-          setTopLosers(losersResult.data.rankings);
-        }
       } catch (error) {
-        console.error('Error fetching rankings:', error);
+        console.error('Error loading data:', error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchRankings();
+    loadAllData();
   }, []);
+
+
+  // Show loading animation during initial data fetch
+  if (isLoading) {
+    return <StockLoading />;
+  }
 
   return (
     <div className="space-y-8 animate-fade-in">
