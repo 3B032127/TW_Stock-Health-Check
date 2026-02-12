@@ -232,6 +232,24 @@ def read_indicator_history(
     }
 
 
+@app.get("/api/market/sectors")
+async def get_sector_performance():
+    from .services.sector_scraper import sector_scraper
+    return sector_scraper.get_sector_performance()
+
+
+@app.get("/api/market/heatmap")
+async def get_real_sector_heatmap():
+    from .services.sector_service import sector_service
+    # await the async method directly
+    data = await sector_service.get_sector_heatmap_async()
+    return {
+        "status": "success",
+        "source": "finmind",
+        "data": data
+    }
+
+
 @app.get("/api/v1/market/rankings/gainers")
 async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50)):
     """

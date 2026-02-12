@@ -5,6 +5,7 @@ import { Stock } from '../types';
 import StockLoading from '../components/StockLoading';
 import { useTaixData, useIndicators, useMarketRankings, Indicator } from '../hooks/useMarketData';
 import SyncIndicator from '../components/SyncIndicator';
+// import SectorHeatmap from '../components/SectorHeatmap';
 
 // Sparkline Component
 
@@ -439,6 +440,9 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
             ))}
         </div>
       </div>
+
+      {/* Sector Heatmap - Hidden for now */}
+      {/* <SectorHeatmap /> */}
 
       {/* Rankings Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
