@@ -1,47 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { Icon } from '../App';
-import { MARKET_INDEX_DATA, INDICATORS } from '../constants';
-import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { Stock } from '../types';
-import { api } from '../services/api';
 import StockLoading from '../components/StockLoading';
+import { useTaixData, useIndicators, useMarketRankings, Indicator } from '../hooks/useMarketData';
+import SyncIndicator from '../components/SyncIndicator';
 
-// API Response Interfaces
-interface TaixDataPoint {
-  date: string;
-  close: number;
-  volume: number;
-}
-
-interface TaixCurrentData {
-  price: number;
-  change: number;
-  changePercent: number;
-  date: string;
-  volume: number;
-  high: number;
-  low: number;
-  open: number;
-}
-
-interface TaixData {
-  current: TaixCurrentData;
-  history: TaixDataPoint[];
-  period: string;
-}
-
-interface Indicator {
-  id?: string;
-  name: string;
-  value: string;
-  change: string;
-  isUp: boolean;
-  description?: string;
-  note?: string;
-  text?: string;
-  isPositiveForMarket?: boolean;
-}
+// Sparkline Component
 
 interface SparklineProps {
   data: any[];
@@ -217,113 +182,40 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
 const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToStock: (id: string) => void, onNavigateToIndicator?: (id: string) => void }) => {
   // State management
   const [selectedPeriod, setSelectedPeriod] = useState<string>('1d');
-  const [taixData, setTaixData] = useState<TaixData | null>(null);
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
-  const [indexData, setIndexData] = useState<{ date: string, value: number }[]>([]);
-  const [topGainers, setTopGainers] = useState<Stock[]>([]);
-  const [topLosers, setTopLosers] = useState<Stock[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Custom Hooks with SWR strategy
+  const {
+    taixData,
+    indexData,
+    isLoading: taixLoading,
+    isFetching: taixFetching,
+    dataUpdatedAt: taixUpdatedAt
+  } = useTaixData(selectedPeriod);
 
-  // Fetch TAIEX data
-  useEffect(() => {
-    const fetchTaixData = async () => {
-      try {
-        const response = await fetch(`http://localhost:8000/api/v1/market/taiex?period=${selectedPeriod}`);
-        const result = await response.json();
+  const {
+    indicators,
+    isLoading: indicatorsLoading,
+    isFetching: indicatorsFetching,
+    dataUpdatedAt: indicatorsUpdatedAt
+  } = useIndicators();
 
-        if (result.status === 'success' && result.data) {
-          setTaixData(result.data);
+  const {
+    gainers: topGainers,
+    losers: topLosers,
+    isLoading: rankingsLoading,
+    isFetching: rankingsFetching,
+    dataUpdatedAt: rankingsUpdatedAt
+  } = useMarketRankings();
 
-          // Map history to chart data format
-          const chartData = result.data.history.map((item: TaixDataPoint) => ({
-            date: item.date,
-            value: item.close
-          }));
-          setIndexData(chartData);
-        }
-      } catch (error) {
-        console.error('Error fetching TAIEX data:', error);
-      }
-    };
+  const isLoading = taixLoading || indicatorsLoading || rankingsLoading;
+  const isFetching = taixFetching || indicatorsFetching || rankingsFetching;
 
-    fetchTaixData();
-  }, [selectedPeriod]);
-
-  // Combined initial data loading - waits for all data to complete
-  useEffect(() => {
-    const loadAllData = async () => {
-      setIsLoading(true);
-
-      try {
-        // Fetch all data in parallel
-        await Promise.all([
-          // Fetch indicators
-          (async () => {
-            try {
-              const response = await fetch('http://localhost:8000/api/v1/market/indicators');
-              const result = await response.json();
-
-              let apiIndicators: Indicator[] = [];
-              if (result.status === 'success' && result.data && result.data.indicators) {
-                apiIndicators = result.data.indicators;
-              }
-
-              // Load monitor light from CSV
-              const monitorData = await loadMonitorLightData();
-              const latestMonitor = getLatestMonitorData(monitorData);
-
-              if (latestMonitor) {
-                const monitorIndicator: Indicator = {
-                  id: 'monitor_light',
-                  name: '景氣對策信號',
-                  value: `${latestMonitor.score.toFixed(0)}分`,
-                  change: `${latestMonitor.signal}燈`,
-                  isUp: latestMonitor.score >= 23,
-                  description: latestMonitor.score >= 32 ? '景氣轉熱' : latestMonitor.score >= 23 ? '景氣穩定' : '景氣轉冷',
-                };
-
-                const filteredApi = apiIndicators.filter(ind => ind.id !== 'monitor_light');
-                setIndicators([...filteredApi, monitorIndicator]);
-              } else {
-                setIndicators(apiIndicators);
-              }
-            } catch (error) {
-              console.error('Error fetching indicators:', error);
-            }
-          })(),
-
-          // Fetch rankings
-          (async () => {
-            try {
-              const [gainersResult, losersResult] = await Promise.all([
-                api.getTopGainers(10),
-                api.getTopLosers(10)
-              ]);
-
-              if (gainersResult.status === 'success' && gainersResult.data.rankings) {
-                setTopGainers(gainersResult.data.rankings);
-              }
-
-              if (losersResult.status === 'success' && losersResult.data.rankings) {
-                setTopLosers(losersResult.data.rankings);
-              }
-            } catch (error) {
-              console.error('Error fetching rankings:', error);
-            }
-          })()
-        ]);
-
-      } catch (error) {
-        console.error('Error loading data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadAllData();
-  }, []);
-
+  // Calculate latest update time
+  const lastUpdated = Math.max(
+    taixUpdatedAt || 0,
+    indicatorsUpdatedAt || 0,
+    rankingsUpdatedAt || 0
+  );
 
   // Show loading animation during initial data fetch
   if (isLoading) {
@@ -331,7 +223,9 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
   }
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-8 animate-fade-in relative">
+      {/* Background Fetch Indicator */}
+      <SyncIndicator isFetching={isFetching && !isLoading} lastUpdated={lastUpdated} />
       {/* Index Section */}
       <div className="rounded-xl bg-surface border border-surfaceLight shadow-sm overflow-hidden">
         <div className="flex flex-col lg:flex-row">
