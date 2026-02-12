@@ -252,12 +252,17 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
             </div>
             <div className="grid grid-cols-2 gap-4 mt-2">
               <div>
-                <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">成交量</p>
+                <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">成交金額</p>
                 <p className="text-lg font-bold text-white">
-                  {taixData && taixData.current.volume > 0
-                    ? `${(taixData.current.volume / 100000000).toFixed(0)} 億`
+                  {taixData && taixData.current.turnover && taixData.current.turnover > 0
+                    ? `${(taixData.current.turnover / 100000000).toFixed(0)} 億`
                     : 'N/A'}
                 </p>
+                {taixData && taixData.current.volume > 0 && (
+                  <p className="text-xs text-textMuted">
+                    成交量: {(taixData.current.volume / 100000000).toFixed(2)} 億張
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">當日區間</p>

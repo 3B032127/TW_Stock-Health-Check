@@ -15,6 +15,7 @@ import google.generativeai as genai
 # Web scraping for Economic Monitor Light
 import httpx
 from bs4 import BeautifulSoup
+import re
 
 
 class MarketIndicatorsService:
@@ -441,8 +442,15 @@ class MarketIndicatorsService:
             daily_change = current_price - yesterday_close
             daily_change_percent = (daily_change / yesterday_close) * 100 if yesterday_close != 0 else 0
             
-            # Get volume and range from latest data
-            volume = float(latest['Volume']) if 'Volume' in latest else 0
+            # Get volume and turnover from Yahoo Finance Taiwan (scraping)
+            yahoo_data = self._fetch_yahoo_taiex_data()
+            volume = yahoo_data.get('volume', 0)
+            turnover = yahoo_data.get('turnover', 0)
+            
+            # If scraping failed, try yfinance volume (though usually 0 for ^TWII)
+            if volume == 0 and 'Volume' in latest:
+                volume = float(latest['Volume'])
+
             high = float(latest['High'])
             low = float(latest['Low'])
             open_price = float(latest['Open'])
@@ -501,6 +509,7 @@ class MarketIndicatorsService:
                     "changePercent": round(daily_change_percent, 2),
                     "date": latest_date.strftime("%Y-%m-%d"),
                     "volume": volume,
+                    "turnover": turnover,
                     "high": round(high, 2),
                     "low": round(low, 2),
                     "open": round(open_price, 2)
@@ -514,6 +523,82 @@ class MarketIndicatorsService:
             import traceback
             traceback.print_exc()
             return self._create_error_taiex_data(str(e))
+
+    def _fetch_yahoo_taiex_data(self) -> Dict[str, float]:
+        """
+        Fetch TAIEX volume and turnover from Yahoo Finance Taiwan
+        Returns dict with 'volume' (shares) and 'turnover' (amount)
+        """
+        try:
+            url = "https://tw.stock.yahoo.com/s/tse.php"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            
+            response = httpx.get(url, headers=headers, timeout=10.0)
+            if response.status_code != 200:
+                print(f"Yahoo scraping failed with status {response.status_code}")
+                return {"volume": 0, "turnover": 0}
+                
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find the script tag containing "root.App.main"
+            script_tags = soup.find_all('script')
+            for script in script_tags:
+                if script.string and "root.App.main" in script.string:
+                    # Improved extraction logic
+                    start_marker = "root.App.main ="
+                    start_index = script.string.find(start_marker)
+                    if start_index != -1:
+                        # Move past the marker
+                        json_start = script.string.find("{", start_index)
+                        if json_start != -1:
+                            # Use rfind to find the last closing brace and semicolon
+                            json_end = script.string.rfind("};")
+                            if json_end != -1:
+                                json_str = script.string[json_start:json_end+1]
+                                
+                                # Sanitize common JS-only values
+                                json_str = json_str.replace("undefined", "null")
+                                
+                                try:
+                                    data = json.loads(json_str)
+                                    
+                                    quote_data = data.get('context', {}).get('dispatcher', {}).get('stores', {}).get('QuoteFundamental', {}).get('quote', {}).get('data', {})
+                                    
+                                    turnover_m = quote_data.get('turnoverM')
+                                    volume = quote_data.get('volume')
+                                    
+                                    result = {}
+                                    
+                                    if volume:
+                                        result['volume'] = float(volume)
+                                        
+                                    if turnover_m:
+                                        # turnoverM is in millions? 
+                                        # Yahoo says "成交金額(億)", but raw data matches millions if 675796 = 6757.96 億 = 675,796,000,000 ??
+                                        # Let's check the verify script output:
+                                        # TurnoverM: 675796, Calc: 6757.96 億
+                                        # So turnoverM is essentially in Millions.
+                                        # We want to return raw amount (which is huge) or scaled amount?
+                                        # Frontend likely expects a number. Let's return raw amount (Millions * 1000000)
+                                        # logical, but display might need adjustment.
+                                        # Let's return the simplified "Million" unit or the "Billion" unit?
+                                        # Actually, yfinance volume is raw shares.
+                                        # Let's return raw amount for turnover too?
+                                        # 675796 * 1,000,000 = 675,796,000,000 (6757 Billion)
+                                        result['turnover'] = float(turnover_m) * 1000000
+                                    
+                                    return result
+                                    
+                                except json.JSONDecodeError as je:
+                                    print(f"JSON Decode Error in Yahoo scraping: {je}")
+            
+            return {"volume": 0, "turnover": 0}
+            
+        except Exception as e:
+            print(f"Error scraping Yahoo Finance: {e}")
+            return {"volume": 0, "turnover": 0}
 
 
     

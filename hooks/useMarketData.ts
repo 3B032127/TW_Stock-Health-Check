@@ -18,6 +18,7 @@ export interface TaixCurrentData {
     changePercent: number;
     date: string;
     volume: number;
+    turnover?: number;
     high: number;
     low: number;
     open: number;
