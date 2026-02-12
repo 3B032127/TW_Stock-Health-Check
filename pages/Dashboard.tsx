@@ -17,13 +17,28 @@ const Sparkline: React.FC<SparklineProps> = ({ data, color }) => (
   <div className="h-10 w-24">
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data}>
-        <Area type="monotone" dataKey="value" stroke={color} fill="transparent" strokeWidth={2} />
+        <defs>
+          <linearGradient id={`gradient-${color}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+            <stop offset="95%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <YAxis domain={['auto', 'auto']} hide />
+        <Area
+          type="monotone"
+          dataKey="value"
+          stroke={color}
+          fill={`url(#gradient-${color})`}
+          strokeWidth={2}
+          isAnimationActive={false}
+        />
       </AreaChart>
     </ResponsiveContainer>
   </div>
 );
 
 interface IndicatorCardProps {
+  id?: string;
   title: string;
   value: string;
   change: string;
@@ -33,6 +48,7 @@ interface IndicatorCardProps {
   text?: string;
   isPositiveForMarket?: boolean;
   onClick?: () => void;
+  historyData?: any[];
 }
 
 const IndicatorCard: React.FC<IndicatorCardProps> = ({
@@ -44,16 +60,21 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
   note,
   text,
   isPositiveForMarket,
-  onClick
+  onClick,
+  historyData
 }) => {
-  // Generate mock trend data (5 points)
-  const trendData = React.useMemo(() => {
+  // Use passed history data or fallback to mock if absolutely necessary (though we prefer empty or real)
+  const chartData = React.useMemo(() => {
+    if (historyData && historyData.length > 0) {
+      return historyData;
+    }
+    // Fallback Mock (only if no history provided)
     const baseValue = 50;
     const trend = isUp ? 1 : -1;
-    return Array.from({ length: 5 }, (_, i) => ({
-      value: baseValue + (i * 3 * trend) + (Math.random() * 2 - 1)
+    return Array.from({ length: 10 }, (_, i) => ({
+      value: baseValue + (i * 3 * trend) + (Math.random() * 5)
     }));
-  }, [isUp]);
+  }, [isUp, historyData]);
 
   return (
     <div
@@ -64,7 +85,7 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
       <div className="flex items-start justify-between mb-2">
         <p className="text-textMuted text-sm font-medium flex-1">{title}</p>
         <div className="ml-2">
-          <Sparkline data={trendData} color={isUp ? '#ef4444' : '#10b981'} />
+          <Sparkline data={chartData} color={isUp ? '#ef4444' : '#10b981'} />
         </div>
       </div>
 
@@ -108,6 +129,16 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
       )}
     </div>
   );
+};
+
+// Wrapper to fetch history for sparkline
+import { useIndicatorHistory } from '../hooks/useMarketData';
+
+const DashboardIndicatorCard: React.FC<IndicatorCardProps> = (props) => {
+  // Fetch only 1 month of history for the sparkline to show short-term trend
+  const { history } = useIndicatorHistory(props.id || '', '1m');
+
+  return <IndicatorCard {...props} historyData={history} />;
 };
 
 interface StockTableProps {
@@ -392,8 +423,9 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
               return orderA - orderB;
             })
             .map((ind, i) => (
-              <IndicatorCard
+              <DashboardIndicatorCard
                 key={ind.id || i}
+                id={ind.id}
                 title={ind.name}
                 value={ind.value}
                 change={ind.change}
