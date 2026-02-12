@@ -205,6 +205,33 @@ def read_taiex_data(period: str = Query(default="1m", pattern="^(1d|1w|1m|1y)$")
     }
 
 
+@app.get("/api/v1/market/indicators/{indicator_id}/history")
+def read_indicator_history(
+    indicator_id: str,
+    period: str = Query(default="1y", pattern="^(1d|1w|1m|6m|1y|5y)$")
+):
+    """
+    Get historical data for a specific market indicator
+    
+    Args:
+        indicator_id: Indicator ID (e.g., usdtwd, sox, us_yield)
+        period: Time period - 1d, 1w, 1m, 6m, 1y, or 5y (default: 1y)
+        
+    Returns:
+        Historical data points
+    """
+    from .services.indicators import get_indicators_service
+    
+    service = get_indicators_service()
+    data = service.fetch_indicator_history(indicator_id, period)
+    
+    return {
+        "status": "success",
+        "source": "yfinance",
+        "data": data
+    }
+
+
 @app.get("/api/v1/market/rankings/gainers")
 async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50)):
     """

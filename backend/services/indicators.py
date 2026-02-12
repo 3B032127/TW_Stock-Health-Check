@@ -617,8 +617,109 @@ class MarketIndicatorsService:
             },
             "history": [],
             "period": "1m",
+            "period": "1m",
             "error": error_msg
         }
+
+    def fetch_indicator_history(self, indicator_id: str, period: str = "1y") -> Dict[str, Any]:
+        """
+        Fetch historical data for a specific indicator
+        
+        Args:
+            indicator_id: ID of the indicator (usdtwd, sox, us_yield, etc.)
+            period: Time period (1d, 1w, 1m, 1y, 5y)
+            
+        Returns:
+            Dict with history data points
+        """
+        # Map indicator IDs to Yahoo Finance tickers
+        ticker_map = {
+            "usdtwd": "TWD=X",
+            "sox": "^SOX",
+            "us_yield": "^TNX",
+            "taiex": "^TWII"
+        }
+        
+        # Handle non-market indicators or those without yahoo tickers
+        if indicator_id not in ticker_map:
+            # For these, we might return empty history or implement specific logic later
+            # For now, return empty to stop random generation on frontend
+            return {
+                "indicator_id": indicator_id,
+                "period": period,
+                "history": []
+            }
+            
+        ticker_symbol = ticker_map[indicator_id]
+        
+        try:
+            ticker = yf.Ticker(ticker_symbol)
+            
+            # Determine interval based on period
+            interval = "1d"
+            scrape_period = period
+            
+            if period == "1d":
+                interval = "5m" # 5-minute data for 1 day
+            elif period == "1w":
+                interval = "30m"
+                scrape_period = "5d" # yfinance uses 5d for 1 week
+            elif period == "1m":
+                interval = "1d"
+                scrape_period = "1mo"
+            elif period == "6m":
+                interval = "1d"
+                scrape_period = "6mo"
+            elif period == "1y":
+                interval = "1d" # Daily for 1 year
+                scrape_period = "1y"
+            elif period == "5y":
+                interval = "1wk" # Weekly for 5 years to reduce data size
+                scrape_period = "5y"
+                
+            hist = ticker.history(period=scrape_period, interval=interval)
+            
+            if hist.empty:
+                return {
+                    "indicator_id": indicator_id,
+                    "period": period,
+                    "history": []
+                }
+                
+            history_data = []
+            
+            # Process dataframe
+            for idx, row in hist.iterrows():
+                # Format date based on interval
+                if period in ["1d", "1w"]:
+                    date_str = idx.strftime("%Y-%m-%d %H:%M")
+                else:
+                    date_str = idx.strftime("%Y-%m-%d")
+                    
+                val = float(row['Close'])
+                
+                # Special handling for USD/TWD (inverse logic for color, but value is same)
+                # Special handling for US Yield (divide by 10 not needed for ^TNX usually, it returns percentage directly e.g. 4.5)
+                
+                history_data.append({
+                    "date": date_str,
+                    "value": val
+                })
+                
+            return {
+                "indicator_id": indicator_id,
+                "period": period,
+                "history": history_data
+            }
+            
+        except Exception as e:
+            print(f"Error fetching history for {indicator_id}: {e}")
+            return {
+                "indicator_id": indicator_id,
+                "period": period,
+                "error": str(e),
+                "history": []
+            }
 
     
     def get_all_indicators(self) -> Dict[str, Any]:

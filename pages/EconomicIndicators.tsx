@@ -3,6 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveCo
 import { Icon } from '../App';
 import { INDICATOR_DETAILS, INDICATOR_CATEGORIES, generateHistoricalData } from '../indicatorDetails';
 import { loadMonitorLightData, getMonitorDataForPeriod, getLatestMonitorData, getSignalColor, getSignalDescription, type MonitorLightData } from '../monitorLightData';
+import { useIndicatorHistory, IndicatorHistoryPoint } from '../hooks/useMarketData';
 
 interface Indicator {
   id?: string;
@@ -48,9 +49,17 @@ interface EconomicIndicatorsProps {
 }
 
 const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicatorId, onNavigateHome }) => {
+  // Helper to determine shortest valid period for an indicator
+  const getShortestPeriod = (id: string) => {
+    if (id === 'monitor_light') return '1y';
+    if (['usdtwd', 'sox', 'us_yield'].includes(id)) return '1d';
+    return '1m';
+  };
+
   const [selectedIndicator, setSelectedIndicator] = useState<string>(initialIndicatorId || 'usdtwd');
   const [indicators, setIndicators] = useState<Indicator[]>([]);
-  const [chartPeriod, setChartPeriod] = useState<string>('1y');
+  // Initialize with shortest period for the default indicator
+  const [chartPeriod, setChartPeriod] = useState<string>(() => getShortestPeriod(initialIndicatorId || 'usdtwd'));
   const [loading, setLoading] = useState(true);
   const [monitorLightData, setMonitorLightData] = useState<MonitorLightData[]>([]);
 
@@ -58,6 +67,7 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
   useEffect(() => {
     if (initialIndicatorId) {
       setSelectedIndicator(initialIndicatorId);
+      setChartPeriod(getShortestPeriod(initialIndicatorId));
     }
   }, [initialIndicatorId]);
 
@@ -111,34 +121,62 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
   const currentIndicatorData = indicators.find(ind => ind.id === selectedIndicator);
   const indicatorDetail = INDICATOR_DETAILS[selectedIndicator];
 
+  // Fetch historical data for selected indicator
+  const { history: indicatorHistory, isLoading: historyLoading } = useIndicatorHistory(selectedIndicator, chartPeriod);
+
   // Generate chart data
   const chartData = useMemo(() => {
     if (!currentIndicatorData || !indicatorDetail) return [];
 
-    // Use real data for monitor_light
-    if (selectedIndicator === 'monitor_light' && monitorLightData.length > 0) {
-      const periodData = getMonitorDataForPeriod(monitorLightData, chartPeriod as '1y' | '5y');
-      return periodData.map(d => ({
-        date: d.date,
-        value: d.score,
-        signal: d.signal,
+    // Use real data for monitor_light (existing logic)
+    if (selectedIndicator === 'monitor_light') {
+      if (monitorLightData.length > 0) {
+        const periodData = getMonitorDataForPeriod(monitorLightData, chartPeriod as '1y' | '5y');
+        return periodData.map(d => ({
+          date: d.date,
+          value: d.score,
+          signal: d.signal,
+        }));
+      }
+      return [];
+    }
+
+    // For market indicators with real history
+    if (indicatorHistory && indicatorHistory.length > 0) {
+      return indicatorHistory.map((point: IndicatorHistoryPoint) => ({
+        date: point.date,
+        value: point.value
       }));
     }
 
-    // Parse current value (remove non-numeric characters)
-    const numericValue = parseFloat(currentIndicatorData.value.replace(/[^0-9.-]/g, ''));
-    if (isNaN(numericValue)) return [];
+    // Fallback/Mock generation for others (e.g. CPI, PPI if no backend data yet)
+    // Only if history is empty and not loading, ensuring we don't show empty chart while loading
+    // But if backend returns empty, we might want to show empty or placeholder.
+    // Let's keep existing mock logic ONLY if we expect no backend data for this ID
+    const marketIndicators = ['usdtwd', 'sox', 'us_yield'];
+    if (!marketIndicators.includes(selectedIndicator)) {
+      // Parse current value (remove non-numeric characters)
+      const numericValue = parseFloat(currentIndicatorData.value.replace(/[^0-9.-]/g, ''));
+      if (isNaN(numericValue)) return [];
+      return generateHistoricalData(numericValue, currentIndicatorData.isUp, chartPeriod);
+    }
 
-    return generateHistoricalData(numericValue, currentIndicatorData.isUp, chartPeriod);
-  }, [currentIndicatorData, indicatorDetail, chartPeriod, selectedIndicator, monitorLightData]);
+    return [];
+  }, [currentIndicatorData, indicatorDetail, chartPeriod, selectedIndicator, monitorLightData, indicatorHistory]);
+
 
   const handleIndicatorClick = (id: string) => {
     setSelectedIndicator(id);
+    setChartPeriod(getShortestPeriod(id));
   };
+
 
   if (loading && indicators.length === 0) {
     return <div className="p-8 text-center text-textMuted animate-pulse">載入數據中...</div>;
   }
+
+  // Check if current indicator supports 1D/Intraday
+  const supportsIntraday = ['usdtwd', 'sox', 'us_yield'].includes(selectedIndicator);
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 animate-fade-in">
@@ -233,6 +271,9 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
                     </>
                   ) : (
                     <>
+                      {supportsIntraday && (
+                        <button onClick={() => setChartPeriod('1d')} className={`px-3 py-1 text-xs font-medium rounded transition-all ${chartPeriod === '1d' ? 'bg-surface text-white shadow-sm' : 'text-textMuted hover:bg-surface hover:text-white'}`}>1D</button>
+                      )}
                       <button onClick={() => setChartPeriod('1m')} className={`px-3 py-1 text-xs font-medium rounded transition-all ${chartPeriod === '1m' ? 'bg-surface text-white shadow-sm' : 'text-textMuted hover:bg-surface hover:text-white'}`}>1M</button>
                       <button onClick={() => setChartPeriod('6m')} className={`px-3 py-1 text-xs font-medium rounded transition-all ${chartPeriod === '6m' ? 'bg-surface text-white shadow-sm' : 'text-textMuted hover:bg-surface hover:text-white'}`}>6M</button>
                       <button onClick={() => setChartPeriod('1y')} className={`px-3 py-1 text-xs font-medium rounded transition-all ${chartPeriod === '1y' ? 'bg-surface text-white shadow-sm' : 'text-textMuted hover:bg-surface hover:text-white'}`}>1Y</button>
@@ -258,10 +299,13 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
                       interval="preserveStartEnd"
                       minTickGap={30}
                       tickFormatter={(value) => {
-                        if (chartPeriod === '1m' || chartPeriod === '6m') {
+                        if (chartPeriod === '1d') {
+                          // Show HH:MM
+                          return value.split(' ')[1] || value;
+                        } else if (chartPeriod === '1m' || chartPeriod === '6m') {
                           // Show month/day (MM/DD)
                           const parts = value.split('-');
-                          return parts.length >= 3 ? `${parts[1]}/${parts[2]}` : value;
+                          return parts.length >= 3 ? `${parts[1]}/${parts[2].split(' ')[0]}` : value;
                         } else {
                           // 1y, 5y: Show year/month (YYYY/MM)
                           const parts = value.split('-');

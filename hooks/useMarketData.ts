@@ -126,6 +126,46 @@ export function useIndicators() {
     };
 }
 
+// ─── useIndicatorHistory ─────────────────────────────────────────────
+
+export interface IndicatorHistoryPoint {
+    date: string;
+    value: number;
+}
+
+export interface IndicatorHistoryData {
+    indicator_id: string;
+    period: string;
+    history: IndicatorHistoryPoint[];
+    error?: string;
+}
+
+export function useIndicatorHistory(indicatorId: string, period: string) {
+    const query = useQuery({
+        queryKey: ['indicatorHistory', indicatorId, period],
+        queryFn: async (): Promise<IndicatorHistoryData> => {
+            // API call to the new endpoint
+            const response = await fetch(`http://localhost:8000/api/v1/market/indicators/${indicatorId}/history?period=${period}`);
+            const result = await response.json();
+
+            if (result.status === 'success' && result.data) {
+                return result.data;
+            }
+            return { indicator_id: indicatorId, period, history: [] };
+        },
+        staleTime: getStaleTime(),
+        refetchInterval: getRefetchInterval(),
+        enabled: !!indicatorId && indicatorId !== 'monitor_light', // Don't fetch for monitor_light or empty id
+    });
+
+    return {
+        history: query.data?.history ?? [],
+        isLoading: query.isLoading,
+        isFetching: query.isFetching,
+        error: query.error as Error | null,
+    };
+}
+
 // ─── useMarketRankings ───────────────────────────────────────────────
 
 interface RankingsData {
