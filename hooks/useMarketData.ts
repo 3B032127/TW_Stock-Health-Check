@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { getRefetchInterval, getStaleTime, getIndicatorRefetchInterval } from '../utils/tradingHours';
@@ -63,6 +63,7 @@ export function useTaixData(period: string) {
         },
         staleTime: getStaleTime(),
         refetchInterval: getRefetchInterval(),
+        placeholderData: keepPreviousData,
     });
 
     return {

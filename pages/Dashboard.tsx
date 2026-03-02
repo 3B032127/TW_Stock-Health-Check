@@ -69,11 +69,13 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
     if (historyData && historyData.length > 0) {
       return historyData;
     }
-    // Fallback Mock (only if no history provided)
+    // Fallback Mock (only if no history provided) - Use stable pseudo-random data to prevent re-render flickering
     const baseValue = 50;
     const trend = isUp ? 1 : -1;
+    // Simple pseudo-random using index to ensure exact same shape on every render
+    const pseudoRandom = (i: number) => ((i * 137) % 100) / 20;
     return Array.from({ length: 10 }, (_, i) => ({
-      value: baseValue + (i * 3 * trend) + (Math.random() * 5)
+      value: baseValue + (i * 3 * trend) + pseudoRandom(i)
     }));
   }, [isUp, historyData]);
 
@@ -154,8 +156,14 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
   const colorClass = isGainer ? 'text-up' : 'text-down';
   const icon = isGainer ? 'trending_up' : 'trending_down';
 
-  // Mock sparkline data (randomized for visual effect)
-  const getMockData = () => Array.from({ length: 10 }, (_, i) => ({ value: Math.random() * 10 + (isGainer ? i : 10 - i) }));
+  // Mock sparkline data (stable generation to prevent re-render flickering)
+  const getMockData = (id: string) => {
+    // Generate simple stable hash from id string to seed the chart shape
+    const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return Array.from({ length: 10 }, (_, i) => ({
+      value: ((hash + i * 17) % 10) + (isGainer ? i : 10 - i)
+    }));
+  };
 
   return (
     <div className="flex flex-col rounded-xl border border-surfaceLight bg-surface overflow-hidden">
@@ -200,7 +208,7 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
                   {isGainer ? '+' : ''}{stock.changePercent.toFixed(2)}%
                 </td>
                 <td className="py-3 px-5">
-                  <Sparkline data={getMockData()} color={isGainer ? '#ef4444' : '#10b981'} />
+                  <Sparkline data={getMockData(stock.id)} color={isGainer ? '#ef4444' : '#10b981'} />
                 </td>
               </tr>
             ))}
@@ -249,8 +257,10 @@ const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToS
     rankingsUpdatedAt || 0
   );
 
+  const isInitialLoading = (!taixData && taixLoading) || (!indicators.length && indicatorsLoading) || (!topGainers.length && rankingsLoading);
+
   // Show loading animation during initial data fetch
-  if (isLoading) {
+  if (isInitialLoading) {
     return <StockLoading />;
   }
 
