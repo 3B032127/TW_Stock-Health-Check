@@ -67,7 +67,10 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
   // Use passed history data or fallback to mock if absolutely necessary (though we prefer empty or real)
   const chartData = React.useMemo(() => {
     if (historyData && historyData.length > 0) {
-      return historyData;
+      // Map API history data (which might be { date: string, value: number }) to { value: number } for sparkline
+      return historyData.map(point => ({
+        value: typeof point === 'number' ? point : point.value
+      }));
     }
     // Fallback Mock (only if no history provided) - Use stable pseudo-random data to prevent re-render flickering
     const baseValue = 50;
