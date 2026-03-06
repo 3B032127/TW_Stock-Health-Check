@@ -16,11 +16,51 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
     // Filter logic
     const filteredStocks = React.useMemo(() => {
         if (!query.trim()) return [];
-        const lowerQuery = query.toLowerCase();
-        return stocks.filter(stock =>
-            stock.stock_id.includes(lowerQuery) ||
-            stock.stock_name.toLowerCase().includes(lowerQuery)
-        ).slice(0, 10); // Show max 10 results
+        const lowerQuery = query.toLowerCase().trim();
+
+        // 1. Deduplicate stocks by stock_id (some stocks have multiple entries for different types)
+        const uniqueStocksMap = new Map();
+        for (const stock of stocks) {
+            if (!uniqueStocksMap.has(stock.stock_id)) {
+                uniqueStocksMap.set(stock.stock_id, stock);
+            }
+        }
+        const uniqueStocks = Array.from(uniqueStocksMap.values());
+
+        // 2. Exact match check
+        const exactIdMatch = uniqueStocks.find(stock => stock.stock_id.toLowerCase().trim() === lowerQuery);
+        const exactNameMatch = uniqueStocks.find(stock => stock.stock_name.toLowerCase().trim() === lowerQuery);
+
+        if (exactIdMatch) {
+            return [exactIdMatch];
+        }
+        if (exactNameMatch) {
+            return [exactNameMatch];
+        }
+
+        const startsWithId: typeof stocks = [];
+        const startsWithName: typeof stocks = [];
+        const includesMatches: typeof stocks = [];
+
+        for (const stock of uniqueStocks) {
+            const id = stock.stock_id.toLowerCase().trim();
+            const name = stock.stock_name.toLowerCase().trim();
+
+            if (id.startsWith(lowerQuery)) {
+                startsWithId.push(stock);
+            } else if (name.startsWith(lowerQuery)) {
+                startsWithName.push(stock);
+            } else if (id.includes(lowerQuery) || name.includes(lowerQuery)) {
+                includesMatches.push(stock);
+            }
+        }
+
+        // Sort each category internally to ensure shortest/most relevant is first
+        startsWithId.sort((a, b) => a.stock_id.length - b.stock_id.length || a.stock_id.localeCompare(b.stock_id));
+        startsWithName.sort((a, b) => a.stock_name.length - b.stock_name.length || a.stock_name.localeCompare(b.stock_name));
+
+        // Combine all, prioritizing prefix matches, then infix matches
+        return [...startsWithId, ...startsWithName, ...includesMatches].slice(0, 10);
     }, [query, stocks]);
 
     // Handle click outside to close dropdown
