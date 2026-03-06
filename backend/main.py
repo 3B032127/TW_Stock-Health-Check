@@ -112,6 +112,34 @@ async def read_cash_flow_history(
     source, items = await finance.get_cash_flow_history(db, stock_id, limit)
     return {"status": "success", "source": source, "data": {"history": [schemas.CashFlowStatement.model_validate(i).model_dump() for i in items]}}
 
+# Cache for stock list
+stock_list_cache = None
+
+@app.get("/api/v1/stock/list")
+async def read_stock_list():
+    """獲取台股所有股票代碼與名稱清單"""
+    global stock_list_cache
+    if stock_list_cache is not None:
+        return {
+            "status": "success",
+            "source": "finmind_cache",
+            "data": stock_list_cache
+        }
+        
+    from .services.finmind import FinMindClient
+    client = FinMindClient()
+    try:
+        data = await client.fetch_stock_info()
+        if data:
+            stock_list_cache = data
+        return {
+            "status": "success",
+            "source": "finmind",
+            "data": data
+        }
+    finally:
+        await client.close()
+
 from .services import market, finance
 
 @app.get("/api/v1/stock/chips", response_model=schemas.ApiResponse)

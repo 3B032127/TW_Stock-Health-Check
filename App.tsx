@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import StockDetail from './pages/StockDetail';
 import EconomicIndicators from './pages/EconomicIndicators';
 import ApiTesting from './pages/ApiTesting';
+import SearchBar from './components/SearchBar';
 
 // --- Icons Component Helper ---
 export const Icon = ({ name, className = "" }: { name: string; className?: string }) => (
@@ -14,10 +15,12 @@ export const Icon = ({ name, className = "" }: { name: string; className?: strin
 
 const Header = ({
   currentView,
-  onChangeView
+  onChangeView,
+  onNavigateToStock
 }: {
   currentView: ViewState;
   onChangeView: (view: ViewState) => void;
+  onNavigateToStock: (stockId: string) => void;
 }) => {
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b border-surfaceLight bg-background/80 backdrop-blur-md px-4 py-3 lg:px-6">
@@ -31,14 +34,7 @@ const Header = ({
       </div>
 
       <div className="flex-1 max-w-md px-4 hidden sm:block">
-        <div className="flex w-full items-center rounded-lg bg-surfaceLight border border-transparent focus-within:border-primary/50 transition-colors h-10 px-3">
-          <Icon name="search" className="text-textMuted text-[20px]" />
-          <input
-            type="text"
-            placeholder="搜尋股票代碼或名稱 (例如: 2330)"
-            className="w-full bg-transparent border-none text-sm text-white placeholder-textMuted focus:ring-0 ml-2"
-          />
-        </div>
+        <SearchBar onNavigateToStock={onNavigateToStock} />
       </div>
 
       <nav className="flex items-center gap-6">
@@ -99,7 +95,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-textMain font-sans">
-      <Header currentView={currentView} onChangeView={setCurrentView} />
+      <Header currentView={currentView} onChangeView={setCurrentView} onNavigateToStock={navigateToStock} />
 
       <main className={`flex-1 w-full ${currentView === ViewState.API_TESTING
         ? ''

@@ -83,6 +83,13 @@ export const api = {
         return response.json();
     },
 
+    // Stock List
+    getStockList: async () => {
+        const response = await fetch(`${API_BASE_URL}/stock/list`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
     // Stock Rankings
     getTopGainers: async (limit: number = 10) => {
         const response = await fetch(`${API_BASE_URL}/market/rankings/gainers?limit=${limit}`);
