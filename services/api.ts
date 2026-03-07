@@ -90,6 +90,36 @@ export const api = {
         return response.json();
     },
 
+    getCompanyProfile: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/profile`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
+    getDividendHistory: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/dividends`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
+    getRevenueMix: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/revenue-mix`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
+    getCompanyNews: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/news`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
+    getNewsContent: async (url: string) => {
+        const response = await fetch(`${API_BASE_URL}/news-content?url=${encodeURIComponent(url)}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
     // Stock Rankings
     getTopGainers: async (limit: number = 10) => {
         const response = await fetch(`${API_BASE_URL}/market/rankings/gainers?limit=${limit}`);

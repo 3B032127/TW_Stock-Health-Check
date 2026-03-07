@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, LineChart, Line, Legend, CartesianGrid, PieChart, Pie, AreaChart, Area } from 'recharts';
 import { Icon } from '../App';
 import { AIAnalysisCard } from '../components/AIAnalysisCard';
@@ -17,6 +17,10 @@ import {
   CHIPS_TREND_DATA
 } from '../constants';
 import { StockTab, FinancialSubTab } from '../types';
+import { useCompanyProfile } from '../hooks/useCompanyProfile';
+import { useDividends } from '../hooks/useDividends';
+import { useRevenueMix } from '../hooks/useRevenueMix';
+import CompanyNews from '../components/CompanyNews';
 
 const MetricCard = ({ category, items }: { category: string; items: any[] }) => {
   const getIcon = (cat: string) => {
@@ -210,7 +214,30 @@ const FinancialTable = ({ data }: { data: any[] }) => (
 
 // --- New Tab Components ---
 
-const CompanyProfile = () => {
+const CompanyProfile = ({ stockId }: { stockId: string }) => {
+  const { data: profile, isLoading, error } = useCompanyProfile(stockId);
+  const { data: dividends, isLoading: isDivLoading } = useDividends(stockId);
+  const { data: revenueMix, isLoading: isRevLoading } = useRevenueMix(stockId);
+
+  if (isLoading || isDivLoading || isRevLoading) {
+    return (
+      <div className="flex flex-col gap-6 items-center justify-center p-12">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-textMuted">載入資料中...</p>
+      </div>
+    );
+  }
+
+  if (error || !profile) {
+    return (
+      <div className="flex flex-col gap-6 items-center justify-center p-12 bg-surface/50 rounded-xl border border-surfaceLight">
+        <Icon name="error_outline" className="text-4xl text-rose-500 mb-2" />
+        <p className="text-white font-medium">無法載入公司基本資料</p>
+        <p className="text-sm text-textMuted">請稍後再試或確認網路連線</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -222,42 +249,52 @@ const CompanyProfile = () => {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
               <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">股票名稱</span>
-                <span className="text-white font-medium">台積電 (2330)</span>
+                <span className="text-textMuted">股票掛牌</span>
+                <span className="text-white font-medium">{profile.name} ({profile.id})</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
                 <span className="text-textMuted">產業類別</span>
-                <span className="text-white font-medium">半導體業</span>
+                <span className="text-white font-medium">{profile.industry}</span>
+              </div>
+              <div className="flex justify-between border-b border-surfaceLight pb-2">
+                <span className="text-textMuted">板塊分類</span>
+                <span className="text-white font-medium">{profile.sector}</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
                 <span className="text-textMuted">董事長</span>
-                <span className="text-white font-medium">劉德音</span>
+                <span className="text-white font-medium">{profile.chairman}</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
                 <span className="text-textMuted">總經理</span>
-                <span className="text-white font-medium">魏哲家</span>
+                <span className="text-white font-medium">{profile.ceo}</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
                 <span className="text-textMuted">實收資本額</span>
-                <span className="text-white font-medium">2,593 億元</span>
+                <span className="text-white font-medium">{profile.capital}</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
                 <span className="text-textMuted">成立日期</span>
-                <span className="text-white font-medium">1987/02/21</span>
+                <span className="text-white font-medium">{profile.foundedDate}</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
                 <span className="text-textMuted">上市日期</span>
-                <span className="text-white font-medium">1994/09/05</span>
+                <span className="text-white font-medium">{profile.listingDate}</span>
               </div>
               <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">統編</span>
-                <span className="text-white font-medium">22099131</span>
+                <span className="text-textMuted">公司網址</span>
+                <a href={profile.website !== 'N/A' ? profile.website : '#'} target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">
+                  {profile.website !== 'N/A' ? '前往網站' : 'N/A'}
+                </a>
+              </div>
+              <div className="flex justify-between border-b border-surfaceLight pb-2">
+                <span className="text-textMuted">員工人數</span>
+                <span className="text-white font-medium">{profile.fullTimeEmployees !== 'N/A' ? `${profile.fullTimeEmployees.toLocaleString()} 人` : 'N/A'}</span>
               </div>
             </div>
             <div className="mt-6">
               <h4 className="text-sm font-bold text-textMuted mb-2">公司簡介</h4>
-              <p className="text-sm text-textMuted leading-relaxed">
-                台灣積體電路製造股份有限公司（TSMC）是全球最大的專用半導體晶圓代工廠。成立於1987年，率先開創了專業積體電路製造服務之商業模式。公司主要業務為製造及銷售積體電路及其他半導體裝置，並提供相關的封裝與測試服務。台積電在先進製程技術（如7奈米、5奈米、3奈米）保持全球領先地位。
+              <p className="text-sm text-textMuted leading-relaxed whitespace-pre-wrap">
+                {profile.description}
               </p>
             </div>
           </div>
@@ -279,15 +316,20 @@ const CompanyProfile = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surfaceLight text-white">
-                  {DIVIDEND_HISTORY.map((row, i) => (
+                  {(dividends || []).map((row: any, i: number) => (
                     <tr key={i} className="hover:bg-surfaceLight/30">
                       <td className="px-4 py-3 text-left font-medium">{row.year}</td>
                       <td className="px-4 py-3">{row.cash}</td>
                       <td className="px-4 py-3">{row.stock}</td>
-                      <td className="px-4 py-3 font-bold text-emerald-400">{row.cash + row.stock}</td>
+                      <td className="px-4 py-3 font-bold text-emerald-400">{(row.cash + row.stock).toFixed(2)}</td>
                       <td className="px-4 py-3 text-textMuted">{row.date}</td>
                     </tr>
                   ))}
+                  {(!dividends || dividends.length === 0) && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-textMuted">暫無股利資料</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -304,7 +346,7 @@ const CompanyProfile = () => {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={REVENUE_MIX_DATA}
+                    data={revenueMix || []}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
@@ -312,7 +354,7 @@ const CompanyProfile = () => {
                     paddingAngle={5}
                     dataKey="value"
                   >
-                    {REVENUE_MIX_DATA.map((entry, index) => (
+                    {(revenueMix || []).map((entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
                     ))}
                   </Pie>
@@ -325,7 +367,7 @@ const CompanyProfile = () => {
               </div>
             </div>
             <div className="space-y-3 mt-2">
-              {REVENUE_MIX_DATA.map((item, i) => (
+              {(revenueMix || []).map((item: any, i: number) => (
                 <div key={i} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
@@ -334,7 +376,14 @@ const CompanyProfile = () => {
                   <span className="font-bold text-white">{item.value}%</span>
                 </div>
               ))}
+              {(!revenueMix || revenueMix.length === 0) && (
+                <div className="text-center text-sm text-textMuted py-4">暫無營收佔比資料</div>
+              )}
             </div>
+          </div>
+
+          <div className="h-[400px]">
+            <CompanyNews stockId={stockId} />
           </div>
         </div>
       </div>
@@ -529,20 +578,30 @@ const ChipsAnalysis = () => {
   );
 };
 
-const StockDetail = () => {
+const StockDetail = ({ stockId = "2330", onNavigateHome }: { stockId?: string, onNavigateHome?: () => void }) => {
   const [activeTab, setActiveTab] = useState<StockTab>(StockTab.PROFILE); // Default set to PROFILE
   const [activeSubTab, setActiveSubTab] = useState<FinancialSubTab>(FinancialSubTab.INCOME);
+  const { data: profile } = useCompanyProfile(stockId);
+
+  // Reset tabs when stockId changes (e.g., from searching a new stock)
+  useEffect(() => {
+    setActiveTab(StockTab.PROFILE);
+    setActiveSubTab(FinancialSubTab.INCOME);
+  }, [stockId]);
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
       {/* Breadcrumb */}
-      <nav className="flex text-sm font-medium text-textMuted">
+      <nav className="flex flex-wrap text-sm font-medium text-textMuted">
         <ol className="flex items-center gap-2">
-          <li>首頁</li>
+          <li className="cursor-pointer hover:text-primary transition-colors flex items-center gap-1" onClick={onNavigateHome}>
+            <Icon name="home" className="text-[16px]" />
+            首頁
+          </li>
           <li><Icon name="chevron_right" className="text-xs" /></li>
-          <li>台股市場</li>
+          <li className="cursor-pointer hover:text-primary transition-colors" onClick={onNavigateHome}>台股市場</li>
           <li><Icon name="chevron_right" className="text-xs" /></li>
-          <li className="text-white font-bold">台積電 (2330)</li>
+          <li className="text-white font-bold">{profile ? `${profile.name} (${profile.id})` : `股票代碼 (${stockId})`}</li>
         </ol>
       </nav>
 
@@ -550,12 +609,18 @@ const StockDetail = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 pb-2">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-4">
-            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white">台積電 (2330)</h1>
-            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20">半導體業</span>
+            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white">
+              {profile ? `${profile.name} (${profile.id})` : stockId}
+            </h1>
+            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20">
+              {profile ? profile.industry : '載入中'}
+            </span>
           </div>
-          <p className="text-textMuted text-sm md:text-base max-w-2xl">
-            台灣積體電路製造股份有限公司。基於 2023 年第三季度財報的基本面分析報告。
-            <span className="block mt-1 text-xs opacity-70">最後更新：2023年10月27日 • 市值：15.2兆 TWD</span>
+          <p className="text-textMuted text-sm md:text-base max-w-2xl truncate">
+            {profile ? profile.description : '公司簡介資料載入中...'}
+            <span className="block mt-1 text-xs opacity-70">
+              {profile && profile.marketCap ? `市值：${(profile.marketCap / 100000000).toFixed(2)} 億 TWD` : ''}
+            </span>
           </p>
         </div>
         <div className="flex gap-3">
@@ -595,7 +660,7 @@ const StockDetail = () => {
       </div>
 
       {/* Content Switch */}
-      {activeTab === StockTab.PROFILE && <CompanyProfile />}
+      {activeTab === StockTab.PROFILE && <CompanyProfile stockId={stockId} />}
       {activeTab === StockTab.QUOTE && <RealTimeQuote />}
       {activeTab === StockTab.CHIPS && <ChipsAnalysis />}
 

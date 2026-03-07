@@ -142,6 +142,114 @@ async def read_stock_list():
 
 from .services import market, finance
 
+@app.get("/api/v1/stock/{stock_id}/profile")
+async def read_stock_profile(stock_id: str):
+    """獲取個別公司的詳細資料"""
+    from .services.yahoo_crawler import YahooStockCrawler
+    
+    crawler = YahooStockCrawler()
+    try:
+        profile = await crawler.get_company_profile(stock_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Company profile not found")
+            
+        return {
+            "status": "success",
+            "source": "yahoo+yfinance",
+            "data": profile
+        }
+    finally:
+        await crawler.close()
+
+@app.get("/api/v1/stock/{stock_id}/dividends")
+async def read_stock_dividends(stock_id: str):
+    """獲取個股歷史股利政策"""
+    from .services.yahoo_crawler import YahooStockCrawler
+    
+    crawler = YahooStockCrawler()
+    try:
+        dividends = await crawler.get_dividend_history(stock_id)
+        return {
+            "status": "success",
+            "source": "yahoo",
+            "data": dividends
+        }
+    finally:
+        await crawler.close()
+
+@app.get("/api/v1/stock/{stock_id}/news")
+async def read_stock_news(stock_id: str):
+    """獲取個股最新相關新聞"""
+    from .services.yahoo_crawler import YahooStockCrawler
+    
+    crawler = YahooStockCrawler()
+    try:
+        news = await crawler.get_company_news(stock_id)
+        return {
+            "status": "success",
+            "source": "yahoo",
+            "data": news
+        }
+    finally:
+        await crawler.close()
+
+from pydantic import BaseModel
+@app.get("/api/v1/news-content")
+async def read_news_content(url: str):
+    """抓取新聞網頁的純文字內文"""
+    from .services.yahoo_crawler import YahooStockCrawler
+    
+    crawler = YahooStockCrawler()
+    try:
+        content = await crawler.fetch_news_content(url)
+        return {
+            "status": "success",
+            "content": content
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "content": "無法取得文章內容，可能遭遇阻擋或文章已下架。"
+        }
+    finally:
+        await crawler.close()
+
+@app.get("/api/v1/stock/{stock_id}/revenue-mix")
+async def read_stock_revenue_mix(stock_id: str):
+    import hashlib
+    hash_val = int(hashlib.md5(stock_id.encode()).hexdigest(), 16)
+    
+    if hash_val % 3 == 0:
+        data = [
+            {"name": "HPC 高效能運算", "value": 44, "color": "#3b82f6"},
+            {"name": "Smartphone 智慧型手機", "value": 33, "color": "#06b6d4"},
+            {"name": "IoT 物聯網", "value": 10, "color": "#10b981"},
+            {"name": "Automotive 車用電子", "value": 6, "color": "#f59e0b"},
+            {"name": "DCE 消費性電子", "value": 2, "color": "#ef4444"},
+            {"name": "Others 其他", "value": 5, "color": "#64748b"}
+        ]
+    elif hash_val % 3 == 1:
+        data = [
+            {"name": "核心基礎業務", "value": 55, "color": "#3b82f6"},
+            {"name": "創新與雲端服務", "value": 25, "color": "#10b981"},
+            {"name": "智慧生活", "value": 15, "color": "#f59e0b"},
+            {"name": "其他投資效益", "value": 5, "color": "#64748b"}
+        ]
+    else:
+        data = [
+            {"name": "傳統事業群", "value": 40, "color": "#64748b"},
+            {"name": "新能源佈局", "value": 35, "color": "#10b981"},
+            {"name": "海外投資收益", "value": 15, "color": "#3b82f6"},
+            {"name": "轉投資及其他", "value": 10, "color": "#f59e0b"}
+        ]
+        
+    return {
+        "status": "success",
+        "source": "mock",
+        "data": data
+    }
+
 @app.get("/api/v1/stock/chips", response_model=schemas.ApiResponse)
 async def read_chips(
     stock_id: str,

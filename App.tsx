@@ -80,9 +80,11 @@ const Footer = () => (
 const App = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
   const [selectedEconomicIndicatorId, setSelectedEconomicIndicatorId] = useState<string | undefined>(undefined);
+  const [selectedStockId, setSelectedStockId] = useState<string>("2330"); // Default to TSMC
 
-  // Function to navigate to stock detail (simulated navigation)
+  // Function to navigate to stock detail
   const navigateToStock = (stockId: string) => {
+    setSelectedStockId(stockId);
     setCurrentView(ViewState.STOCK_DETAIL);
     window.scrollTo(0, 0);
   };
@@ -107,7 +109,7 @@ const App = () => {
             onNavigateToIndicator={navigateToIndicator}
           />
         )}
-        {currentView === ViewState.STOCK_DETAIL && <StockDetail />}
+        {currentView === ViewState.STOCK_DETAIL && <StockDetail stockId={selectedStockId} onNavigateHome={() => setCurrentView(ViewState.DASHBOARD)} />}
         {currentView === ViewState.ECONOMIC_INDICATORS && (
           <EconomicIndicators
             initialIndicatorId={selectedEconomicIndicatorId}
