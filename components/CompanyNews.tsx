@@ -11,6 +11,7 @@ const CompanyNews: React.FC<CompanyNewsProps> = ({ stockId }) => {
     const { data: newsList, isLoading, error } = useCompanyNews(stockId);
 
     const [selectedNews, setSelectedNews] = useState<any | null>(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
     const [isFetchingContent, setIsFetchingContent] = useState(false);
     const [newsContent, setNewsContent] = useState<string | null>(null);
     const [modalError, setModalError] = useState<string | null>(null);
@@ -18,6 +19,8 @@ const CompanyNews: React.FC<CompanyNewsProps> = ({ stockId }) => {
     const handleNewsClick = async (e: React.MouseEvent, news: any) => {
         e.preventDefault();
         setSelectedNews(news);
+        // Allow render before starting transition
+        setTimeout(() => setIsModalOpen(true), 10);
         setIsFetchingContent(true);
         setNewsContent(null);
         setModalError(null);
@@ -37,9 +40,12 @@ const CompanyNews: React.FC<CompanyNewsProps> = ({ stockId }) => {
     };
 
     const closeModal = () => {
-        setSelectedNews(null);
-        setNewsContent(null);
-        setModalError(null);
+        setIsModalOpen(false);
+        setTimeout(() => {
+            setSelectedNews(null);
+            setNewsContent(null);
+            setModalError(null);
+        }, 300); // Wait for animation duration
     };
 
     return (
@@ -98,8 +104,9 @@ const CompanyNews: React.FC<CompanyNewsProps> = ({ stockId }) => {
 
             {/* Modal 區塊 */}
             {selectedNews && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 backdrop-blur-sm bg-black/70">
-                    <div className="bg-surface rounded-xl flex flex-col w-full max-w-3xl max-h-[90vh] shadow-2xl border border-surfaceLight overflow-hidden relative animate-in fade-in zoom-in duration-200">
+                <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 transition-opacity duration-300 ${isModalOpen ? 'opacity-100' : 'opacity-0'}`}>
+                    <div className="absolute inset-0 backdrop-blur-sm bg-black/70" onClick={closeModal}></div>
+                    <div className={`bg-surface rounded-xl flex flex-col w-full max-w-3xl max-h-[90vh] shadow-2xl border border-surfaceLight overflow-hidden relative transition-all duration-300 ease-out transform ${isModalOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'}`}>
 
                         {/* Header */}
                         <div className="p-5 border-b border-surfaceLight flex justify-between items-start sticky top-0 bg-surface z-10">

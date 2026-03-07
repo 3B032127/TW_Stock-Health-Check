@@ -32,6 +32,9 @@ export interface ValuationData {
   pbRatio: number;
   dividendYield: number;
   sparklineData: { time: string; value: number }[];
+  peSparkline?: { time: string; value: number }[];
+  pbSparkline?: { time: string; value: number }[];
+  yieldSparkline?: { time: string; value: number }[];
 }
 
 export interface FinancialHighlightsData {

@@ -224,7 +224,8 @@ async def read_stock_valuation(stock_id: str):
     client = FinMindClient()
     try:
         end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+        # Fetch 1 year of data to show meaningful long-term trends for valuation metrics
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         
         # 1. 獲取本益比等估值資料
         per_data = await client.fetch_per(stock_id, start_date, end_date)
@@ -249,11 +250,28 @@ async def read_stock_valuation(stock_id: str):
         latest_per = per_data[-1]
         latest_price = price_data[-1]
         
-        # 組合走勢圖資料 (取近 30 筆交易日)
-        recent_prices = price_data[-30:] if len(price_data) > 30 else price_data
+        # 組合走勢圖資料 (取近 1 年/250 筆 以展現具意義的估值河流圖趨勢)
+        recent_prices = price_data[-250:] if len(price_data) > 250 else price_data
+        recent_per = per_data[-250:] if len(per_data) > 250 else per_data
+
         sparkline_data = [
-            {"time": d.get("date", "")[5:], "value": d.get("close", 0)}
+            {"time": d.get("date", ""), "value": d.get("close", 0)}
             for d in recent_prices
+        ]
+        
+        pe_sparkline = [
+            {"time": d.get("date", ""), "value": d.get("PER", 0)}
+            for d in recent_per if "PER" in d
+        ]
+        
+        pb_sparkline = [
+            {"time": d.get("date", ""), "value": d.get("PBR", 0)}
+            for d in recent_per if "PBR" in d
+        ]
+        
+        yield_sparkline = [
+            {"time": d.get("date", ""), "value": d.get("dividend_yield", 0)}
+            for d in recent_per if "dividend_yield" in d
         ]
         
         valuation = {
@@ -261,7 +279,10 @@ async def read_stock_valuation(stock_id: str):
             "peRatio": latest_per.get("PER", 0),
             "pbRatio": latest_per.get("PBR", 0),
             "dividendYield": latest_per.get("dividend_yield", 0),
-            "sparklineData": sparkline_data
+            "sparklineData": sparkline_data,
+            "peSparkline": pe_sparkline,
+            "pbSparkline": pb_sparkline,
+            "yieldSparkline": yield_sparkline
         }
         
         return {
