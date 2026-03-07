@@ -14,13 +14,19 @@ import {
   DIVIDEND_HISTORY,
   STOCK_INTRADAY_DATA,
   ORDER_BOOK_DATA,
-  CHIPS_TREND_DATA
+  CHIPS_TREND_DATA,
+  MOCK_VALUATION_DATA,
+  MOCK_FINANCIAL_HIGHLIGHTS,
+  MOCK_PEER_COMPARISON,
+  MOCK_OWNERSHIP_DATA
 } from '../constants';
 import { StockTab, FinancialSubTab } from '../types';
 import { useCompanyProfile } from '../hooks/useCompanyProfile';
 import { useDividends } from '../hooks/useDividends';
 import { useRevenueMix } from '../hooks/useRevenueMix';
+import { useValuationMetrics } from '../hooks/useValuationMetrics';
 import CompanyNews from '../components/CompanyNews';
+import SearchBar from '../components/SearchBar';
 
 const MetricCard = ({ category, items }: { category: string; items: any[] }) => {
   const getIcon = (cat: string) => {
@@ -214,6 +220,217 @@ const FinancialTable = ({ data }: { data: any[] }) => (
 
 // --- New Tab Components ---
 
+const SparklineChart = ({ data }: { data: { time: string; value: number }[] }) => {
+  if (!data || data.length === 0) return null;
+  const min = Math.min(...data.map(d => d.value));
+  const max = Math.max(...data.map(d => d.value));
+  const isUp = data[data.length - 1].value >= data[0].value;
+  const color = isUp ? '#ef4444' : '#10b981';
+
+  return (
+    <div className="w-24 h-10 ml-auto">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+          <YAxis domain={[min - (max - min) * 0.1, max + (max - min) * 0.1]} hide />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+const ValuationMetrics = ({ stockId }: { stockId: string }) => {
+  const { data, isLoading, error } = useValuationMetrics(stockId);
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-pulse">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="bg-surface border border-surfaceLight rounded-xl p-5 h-[104px]">
+            <div className="h-4 bg-surfaceLight w-16 mb-4 rounded"></div>
+            <div className="h-6 bg-surfaceLight w-24 rounded"></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="bg-surface border border-surfaceLight rounded-xl p-5 h-[104px] flex items-center justify-center">
+            <span className="text-textMuted text-xs">暫無估值資料</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="bg-surface border border-surfaceLight rounded-xl p-5 flex flex-col justify-between relative overflow-hidden group">
+        <div className="absolute top-0 right-0 p-3 opacity-10"><Icon name="show_chart" className="text-4xl text-primary" /></div>
+        <p className="text-sm text-textMuted mb-2">目前股價</p>
+        <div className="flex items-end gap-2">
+          <span className="text-3xl font-bold text-white z-10">{data.price.toFixed(2)}</span>
+          <span className="text-sm text-textMuted mb-1 z-10">TWD</span>
+        </div>
+        <div className="absolute bottom-4 right-4 z-0">
+          <SparklineChart data={data.sparklineData} />
+        </div>
+      </div>
+
+      <div className="bg-surface border border-surfaceLight rounded-xl p-5 flex flex-col justify-between">
+        <p className="text-sm text-textMuted mb-2">本益比 (P/E)</p>
+        <div className="flex items-baseline gap-2">
+          <span className="text-3xl font-bold text-white z-10">{data.peRatio ? data.peRatio.toFixed(1) : '-'}</span>
+          <span className="text-sm text-textMuted z-10">倍</span>
+        </div>
+        {data.peRatio > 0 && data.peRatio < 15 ? (
+          <div className="mt-2 text-xs text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded w-fit z-10">偏低估值</div>
+        ) : (
+          <div className="mt-2 text-xs text-textMuted bg-surfaceLight/50 px-2 py-1 rounded w-fit z-10">合理區間</div>
+        )}
+      </div>
+
+      <div className="bg-surface border border-surfaceLight rounded-xl p-5 flex flex-col justify-between">
+        <p className="text-sm text-textMuted mb-2">股價淨值比 (P/B)</p>
+        <div className="flex items-baseline gap-2">
+          <span className="text-3xl font-bold text-white z-10">{data.pbRatio ? data.pbRatio.toFixed(2) : '-'}</span>
+          <span className="text-sm text-textMuted z-10">倍</span>
+        </div>
+        {data.pbRatio > 0 && data.pbRatio < 1.5 ? (
+          <div className="mt-2 text-xs text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded w-fit z-10">低於淨值</div>
+        ) : (
+          <div className="mt-2 text-xs text-textMuted bg-surfaceLight/50 px-2 py-1 rounded w-fit z-10">合理區間</div>
+        )}
+      </div>
+
+      <div className="bg-surface border border-surfaceLight rounded-xl p-5 flex flex-col justify-between">
+        <p className="text-sm text-textMuted mb-2">現金殖利率</p>
+        <div className="flex items-baseline gap-2">
+          <span className="text-3xl font-bold text-amber-400 z-10">{data.dividendYield ? data.dividendYield.toFixed(1) : '-'}</span>
+          <span className="text-xl font-bold text-amber-400 z-10">%</span>
+        </div>
+        {data.dividendYield > 4 ? (
+          <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded w-fit z-10">高配息</div>
+        ) : (
+          <div className="mt-2 text-xs text-textMuted bg-surfaceLight/50 px-2 py-1 rounded w-fit z-10">穩定配息</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+const FinancialHighlights = () => {
+  const data = MOCK_FINANCIAL_HIGHLIGHTS;
+  return (
+    <div className="bg-surface border border-surfaceLight rounded-xl p-6">
+      <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
+        <Icon name="insights" className="text-amber-500" />
+        營運速覽
+      </h3>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 divide-y md:divide-y-0 md:divide-x divide-surfaceLight text-center">
+        <div className="flex flex-col pt-4 md:pt-0 pb-4 md:pb-0">
+          <span className="text-sm text-textMuted mb-1">最新月營收</span>
+          <span className="text-xl font-bold text-white">{data.monthlyRevenue.value} 億</span>
+          <span className={`text-xs mt-1 ${data.monthlyRevenue.yoy >= 0 ? 'text-up' : 'text-down'}`}>
+            YoY {data.monthlyRevenue.yoy >= 0 ? '+' : ''}{data.monthlyRevenue.yoy}%
+          </span>
+        </div>
+        <div className="flex flex-col pt-4 md:pt-0 pb-4 md:pb-0">
+          <span className="text-sm text-textMuted mb-1">近四季 EPS</span>
+          <span className="text-xl font-bold text-white">{data.eps} 元</span>
+        </div>
+        <div className="flex flex-col pt-4 md:pt-0 pb-4 md:pb-0">
+          <span className="text-sm text-textMuted mb-1">毛利率</span>
+          <span className="text-xl font-bold text-white">{data.grossMargin.toFixed(2)}%</span>
+        </div>
+        <div className="flex flex-col pt-4 md:pt-0 pb-4 md:pb-0">
+          <span className="text-sm text-textMuted mb-1">營益率</span>
+          <span className="text-xl font-bold text-white">{data.operatingMargin.toFixed(2)}%</span>
+        </div>
+        <div className="flex flex-col pt-4 md:pt-0 pb-4 md:pb-0">
+          <span className="text-sm text-textMuted mb-1">淨利率</span>
+          <span className="text-xl font-bold text-white">{data.netMargin.toFixed(2)}%</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PeerComparison = () => {
+  const peers = MOCK_PEER_COMPARISON;
+  return (
+    <div className="bg-surface border border-surfaceLight rounded-xl overflow-hidden">
+      <div className="p-4 border-b border-surfaceLight bg-surfaceLight/30 flex justify-between items-center">
+        <h3 className="font-bold text-white flex items-center gap-2">
+          <Icon name="compare_arrows" className="text-blue-400" />
+          同業比較 (營建業)
+        </h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-right">
+          <thead className="bg-surface text-textMuted border-b border-surfaceLight">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium">股票名稱</th>
+              <th className="px-4 py-3 font-medium">股價</th>
+              <th className="px-4 py-3 font-medium">本益比 (P/E)</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-surfaceLight text-white">
+            {peers.map((peer, i) => (
+              <tr key={peer.id} className={`hover:bg-surfaceLight/20 ${peer.id === '5521' ? 'bg-primary/5' : ''}`}>
+                <td className="px-4 py-3 text-left">
+                  <span className="font-bold">{peer.name}</span> <span className="text-textMuted text-xs ml-1">{peer.id}</span>
+                  {peer.id === '5521' && <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-primary/20 text-primary rounded border border-primary/20">目前</span>}
+                </td>
+                <td className="px-4 py-3 font-medium">{peer.price.toFixed(2)}</td>
+                <td className="px-4 py-3">{peer.peRatio.toFixed(1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const OwnershipSummary = () => {
+  const data = MOCK_OWNERSHIP_DATA;
+
+  const renderBar = (label: string, value: number, colorClass: string, bgClass: string) => (
+    <div className="mb-4 last:mb-0">
+      <div className="flex justify-between text-sm mb-1.5">
+        <span className="text-textMuted">{label}</span>
+        <span className="text-white font-bold">{value.toFixed(2)}%</span>
+      </div>
+      <div className="w-full h-2 bg-slate-700/50 rounded-full overflow-hidden">
+        <div className={`h-full ${bgClass} rounded-full`} style={{ width: `${value}%` }}></div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="bg-surface border border-surfaceLight rounded-xl p-6">
+      <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
+        <Icon name="groups" className="text-indigo-400" />
+        股權與籌碼摘要
+      </h3>
+      <div className="mt-2 text-xs text-textMuted mb-5">營建股通常具有法人持股比例偏低，董監與大股東持股較為穩定的特性。</div>
+      <div className="space-y-2">
+        {renderBar('董監持股', data.directors, 'text-blue-400', 'bg-blue-500')}
+        {renderBar('外資持股', data.foreign, 'text-emerald-400', 'bg-emerald-500')}
+        {renderBar('投信持股', data.investmentTrust, 'text-rose-400', 'bg-rose-500')}
+      </div>
+    </div>
+  );
+};
+
+// --- New Tab Components ---
+
 const CompanyProfile = ({ stockId }: { stockId: string }) => {
   const { data: profile, isLoading, error } = useCompanyProfile(stockId);
   const { data: dividends, isLoading: isDivLoading } = useDividends(stockId);
@@ -240,6 +457,8 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
+      <ValuationMetrics stockId={stockId} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-surface border border-surfaceLight rounded-xl p-6">
@@ -299,6 +518,8 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
             </div>
           </div>
 
+          <FinancialHighlights />
+
           <div className="bg-surface border border-surfaceLight rounded-xl p-6">
             <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
               <Icon name="paid" className="text-emerald-500" />
@@ -334,9 +555,13 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
               </table>
             </div>
           </div>
+
+          <PeerComparison />
         </div>
 
         <div className="lg:col-span-1 space-y-6">
+          <OwnershipSummary />
+
           <div className="bg-surface border border-surfaceLight rounded-xl p-6 h-fit">
             <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
               <Icon name="pie_chart" className="text-blue-400" />
@@ -578,7 +803,7 @@ const ChipsAnalysis = () => {
   );
 };
 
-const StockDetail = ({ stockId = "2330", onNavigateHome }: { stockId?: string, onNavigateHome?: () => void }) => {
+const StockDetail = ({ stockId = "2330", onNavigateHome, onNavigateToStock }: { stockId?: string, onNavigateHome?: () => void, onNavigateToStock?: (id: string) => void }) => {
   const [activeTab, setActiveTab] = useState<StockTab>(StockTab.PROFILE); // Default set to PROFILE
   const [activeSubTab, setActiveSubTab] = useState<FinancialSubTab>(FinancialSubTab.INCOME);
   const { data: profile } = useCompanyProfile(stockId);
@@ -633,6 +858,15 @@ const StockDetail = ({ stockId = "2330", onNavigateHome }: { stockId?: string, o
             <span>下載完整報告</span>
           </button>
         </div>
+      </div>
+
+      {/* Search Bar for detailed page */}
+      <div className="w-full md:w-96 mb-2">
+        <SearchBar onNavigateToStock={(id) => {
+          if (id !== stockId && onNavigateToStock) {
+            onNavigateToStock(id);
+          }
+        }} />
       </div>
 
       {/* Main Tabs */}

@@ -50,6 +50,9 @@ class FinMindClient:
     async def fetch_dividend(self, stock_id: str, start_date: str, end_date: str):
         return await self.fetch_data("TaiwanStockDividend", stock_id, start_date, end_date)
 
+    async def fetch_per(self, stock_id: str, start_date: str, end_date: str):
+        return await self.fetch_data("TaiwanStockPER", stock_id, start_date, end_date)
+
     async def fetch_economics(self, indicator: str, start_date: str, end_date: str):
         # GovernmentBondsYield is separate, but TaiwanEconomicIndicators covers GDP, CPI etc.
         # Check FinMind docs: TaiwanEconomicIndicators, data_id=indicator

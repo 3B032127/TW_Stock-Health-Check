@@ -83,11 +83,25 @@ export const api = {
         return response.json();
     },
 
-    // Stock List
     getStockList: async () => {
-        const response = await fetch(`${API_BASE_URL}/stock/list`);
-        if (!response.ok) throw new Error('Network response was not ok');
-        return response.json();
+        try {
+            const response = await fetch(`${API_BASE_URL}/stock/list`);
+            if (!response.ok) throw new Error('Network response was not ok');
+            const data = await response.json();
+            if (data.status === 'error') throw new Error(data.message);
+            return data;
+        } catch (error) {
+            console.warn("FastAPI backend failed, falling back to direct FinMind API fetch...", error);
+            // Fallback to direct FinMind API if FastAPI is unavailable
+            const fbResponse = await fetch("https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo");
+            if (!fbResponse.ok) throw new Error("Fallback FinMind API failed too");
+            const fbData = await fbResponse.json();
+            return {
+                status: "success",
+                source: "finmind_direct",
+                data: fbData.data || []
+            };
+        }
     },
 
     getCompanyProfile: async (stockId: string) => {
@@ -107,6 +121,13 @@ export const api = {
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
     },
+
+    getValuationMetrics: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/valuation`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
 
     getCompanyNews: async (stockId: string) => {
         const response = await fetch(`${API_BASE_URL}/stock/${stockId}/news`);

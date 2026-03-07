@@ -25,6 +25,37 @@ export interface FinancialMetric {
   status: 'pass' | 'fail' | 'neutral';
 }
 
+// --- New Interfaces for Profile Data Blocks ---
+export interface ValuationData {
+  price: number;
+  peRatio: number;
+  pbRatio: number;
+  dividendYield: number;
+  sparklineData: { time: string; value: number }[];
+}
+
+export interface FinancialHighlightsData {
+  monthlyRevenue: { value: string; yoy: number };
+  eps: string;
+  grossMargin: number;
+  operatingMargin: number;
+  netMargin: number;
+}
+
+export interface PeerComparisonData {
+  id: string;
+  name: string;
+  price: number;
+  peRatio: number;
+}
+
+export interface OwnershipData {
+  directors: number;
+  foreign: number;
+  investmentTrust: number;
+}
+// ----------------------------------------------
+
 export interface NavItem {
   id: string;
   label: string;

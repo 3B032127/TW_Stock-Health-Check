@@ -1,4 +1,4 @@
-import { Indicator, Stock, FinancialMetric } from './types';
+import { Indicator, Stock, FinancialMetric, ValuationData, FinancialHighlightsData, PeerComparisonData, OwnershipData } from './types';
 
 export const MARKET_INDEX_DATA = [
   { time: '09:00', value: 17580 },
@@ -190,3 +190,44 @@ export const CASH_FLOW_TABLE_DATA = [
   { item: '自由現金流量', q1: '170,000', q4: '170,000', q3: '150,000', q2: '130,000', q1_prev: '120,000', highlight: true },
   { item: '期末現金餘額', q1: '1,245,600', q4: '1,150,300', q3: '1,080,400', q2: '980,500', q1_prev: '1,100,200' },
 ];
+
+// --- Mock Data for New Company Profile Components (Construction Sector 5521) ---
+
+export const MOCK_VALUATION_DATA: ValuationData = {
+  price: 18.25,
+  peRatio: 15.2,
+  pbRatio: 1.2,
+  dividendYield: 4.5,
+  sparklineData: [
+    { time: '1', value: 17.5 }, { time: '2', value: 17.6 }, { time: '3', value: 17.8 },
+    { time: '4', value: 17.7 }, { time: '5', value: 17.9 }, { time: '6', value: 18.1 },
+    { time: '7', value: 18.0 }, { time: '8', value: 18.2 }, { time: '9', value: 18.4 },
+    { time: '10', value: 18.3 }, { time: '11', value: 18.35 }, { time: '12', value: 18.5 },
+    { time: '13', value: 18.4 }, { time: '14', value: 18.6 }, { time: '15', value: 18.5 },
+    { time: '16', value: 18.2 }, { time: '17', value: 18.1 }, { time: '18', value: 17.9 },
+    { time: '19', value: 17.8 }, { time: '20', value: 18.0 }, { time: '21', value: 18.1 },
+    { time: '22', value: 18.2 }, { time: '23', value: 18.3 }, { time: '24', value: 18.4 },
+    { time: '25', value: 18.5 }, { time: '26', value: 18.6 }, { time: '27', value: 18.5 },
+    { time: '28', value: 18.4 }, { time: '29', value: 18.3 }, { time: '30', value: 18.25 },
+  ]
+};
+
+export const MOCK_FINANCIAL_HIGHLIGHTS: FinancialHighlightsData = {
+  monthlyRevenue: { value: '4.2', yoy: 12.5 }, // in hundred millions
+  eps: '1.20',
+  grossMargin: 8.5,
+  operatingMargin: 4.2,
+  netMargin: 3.8
+};
+
+export const MOCK_PEER_COMPARISON: PeerComparisonData[] = [
+  { id: '5521', name: '工信', price: 18.25, peRatio: 15.2 },
+  { id: '5522', name: '遠雄', price: 78.50, peRatio: 12.5 },
+  { id: '2597', name: '潤弘', price: 165.00, peRatio: 16.8 },
+];
+
+export const MOCK_OWNERSHIP_DATA: OwnershipData = {
+  directors: 15.2,
+  foreign: 4.5,
+  investmentTrust: 1.2
+};

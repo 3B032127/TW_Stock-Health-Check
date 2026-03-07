@@ -215,6 +215,67 @@ async def read_news_content(url: str):
     finally:
         await crawler.close()
 
+@app.get("/api/v1/stock/{stock_id}/valuation")
+async def read_stock_valuation(stock_id: str):
+    """獲取個股核心估值指標 (PE, PB, Yield) 與近 30 天走勢"""
+    from .services.finmind import FinMindClient
+    from datetime import datetime, timedelta
+    
+    client = FinMindClient()
+    try:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+        
+        # 1. 獲取本益比等估值資料
+        per_data = await client.fetch_per(stock_id, start_date, end_date)
+        
+        # 2. 獲取股價走勢
+        price_data = await client.fetch_price(stock_id, start_date, end_date)
+        
+        if not per_data or not price_data:
+            # 如果 FinMind 沒有資料，回傳基本格式防止前端崩潰
+            return {
+                "status": "success",
+                "source": "empty",
+                "data": {
+                    "price": 0,
+                    "peRatio": 0,
+                    "pbRatio": 0,
+                    "dividendYield": 0,
+                    "sparklineData": []
+                }
+            }
+            
+        latest_per = per_data[-1]
+        latest_price = price_data[-1]
+        
+        # 組合走勢圖資料 (取近 30 筆交易日)
+        recent_prices = price_data[-30:] if len(price_data) > 30 else price_data
+        sparkline_data = [
+            {"time": d.get("date", "")[5:], "value": d.get("close", 0)}
+            for d in recent_prices
+        ]
+        
+        valuation = {
+            "price": latest_price.get("close", 0),
+            "peRatio": latest_per.get("PER", 0),
+            "pbRatio": latest_per.get("PBR", 0),
+            "dividendYield": latest_per.get("dividend_yield", 0),
+            "sparklineData": sparkline_data
+        }
+        
+        return {
+            "status": "success",
+            "source": "finmind",
+            "data": valuation
+        }
+    except Exception as e:
+        print(f"Error fetching valuation for {stock_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch valuation data")
+    finally:
+        await client.close()
+
+
 @app.get("/api/v1/stock/{stock_id}/revenue-mix")
 async def read_stock_revenue_mix(stock_id: str):
     import hashlib
