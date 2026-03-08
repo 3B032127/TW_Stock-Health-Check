@@ -12,9 +12,11 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
     const [isFocused, setIsFocused] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(-1);
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     // Filter logic
     const filteredStocks = React.useMemo(() => {
+        console.log('SearchBar stocks length:', stocks.length, 'query:', query);
         if (!query.trim()) return [];
         const lowerQuery = query.toLowerCase().trim();
 
@@ -99,14 +101,19 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
         setQuery('');
         setIsFocused(false);
         setSelectedIndex(-1);
+        inputRef.current?.blur(); // Force DOM blur to keep it in sync with React state
         onNavigateToStock(stockId);
     };
 
     return (
         <div ref={wrapperRef} className="relative flex w-full items-center">
-            <div className="flex w-full items-center rounded-lg bg-surfaceLight border border-transparent focus-within:border-primary/50 transition-colors h-10 px-3 z-10 relative">
+            <div
+                className="flex w-full items-center rounded-lg bg-surfaceLight border border-transparent focus-within:border-primary/50 transition-colors h-10 px-3 z-10 relative cursor-text"
+                onClick={() => inputRef.current?.focus()}
+            >
                 <Icon name="search" className="text-textMuted text-[20px]" />
                 <input
+                    ref={inputRef}
                     type="text"
                     placeholder={isLoading ? "載入股票清單中..." : "搜尋股票代碼或名稱 (例如: 2330)"}
                     className="w-full bg-transparent border-none text-sm text-white placeholder-textMuted focus:ring-0 ml-2 outline-none h-full"
@@ -114,6 +121,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
                     onChange={(e) => {
                         setQuery(e.target.value);
                         setSelectedIndex(-1);
+                        setIsFocused(true); // Ensure dropdown opens if user types
                     }}
                     onFocus={() => setIsFocused(true)}
                     onKeyDown={handleKeyDown}

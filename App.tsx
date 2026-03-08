@@ -109,7 +109,7 @@ const App = () => {
             onNavigateToIndicator={navigateToIndicator}
           />
         )}
-        {currentView === ViewState.STOCK_DETAIL && <StockDetail stockId={selectedStockId} onNavigateHome={() => setCurrentView(ViewState.DASHBOARD)} onNavigateToStock={navigateToStock} />}
+        {currentView === ViewState.STOCK_DETAIL && <StockDetail key={selectedStockId} stockId={selectedStockId} onNavigateHome={() => setCurrentView(ViewState.DASHBOARD)} onNavigateToStock={navigateToStock} />}
         {currentView === ViewState.ECONOMIC_INDICATORS && (
           <EconomicIndicators
             initialIndicatorId={selectedEconomicIndicatorId}
