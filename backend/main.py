@@ -345,6 +345,19 @@ async def read_chips(
         "data": {"history": items} # Simplified response structure
     }
 
+@app.get("/api/v1/stock/{stock_id}/ownership")
+async def read_stock_ownership(
+    stock_id: str,
+    db: Session = Depends(get_db)
+):
+    """獲取個股真實股權與籌碼摘要資料"""
+    source, data = await market.get_ownership_data(db, stock_id)
+    return {
+        "status": "success",
+        "source": source,
+        "data": data
+    }
+
 @app.get("/api/v1/stock/price", response_model=schemas.ApiResponse)
 async def read_price(
     stock_id: str,

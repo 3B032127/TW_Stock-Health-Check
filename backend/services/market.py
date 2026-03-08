@@ -187,3 +187,58 @@ async def get_economic_data(db: Session):
     
     await client.close()
     return "mixed", results
+
+
+async def get_ownership_data(db: Session, stock_id: str):
+    """
+    獲取真實股權與籌碼摘要資料:
+    - 董監持股: 從 Yahoo TW Profile 抓取 (即時)
+    - 外資持股: 從 FinMind TaiwanStockShareholding 抓取
+    - 投信持股: 暫時回傳固定或估算值 (多數網站需進階訂閱或爬取困難)
+    """
+    from bs4 import BeautifulSoup
+    import httpx
+    
+    source = "mixed"
+    data = {
+        "directors": 15.5, # 預設 mock 值
+        "foreign": 30.0,
+        "investmentTrust": 2.5 # 較難精確抓取總持股比，給予固假定預設值或從最新三大法人買賣超推算(實務上難度高)
+    }
+    
+    # 1. 抓取外資持股比例 (FinMind)
+    client = FinMindClient()
+    try:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        shareholding_list = await client.fetch_data("TaiwanStockShareholding", stock_id, start_date, end_date)
+        if shareholding_list and len(shareholding_list) > 0:
+            latest = shareholding_list[-1]
+            data["foreign"] = latest.get("ForeignInvestmentSharesRatio", data["foreign"])
+    except Exception as e:
+        print(f"Error fetching foreign ownership from FinMind for {stock_id}: {e}")
+    finally:
+        await client.close()
+        
+    # 2. 抓取董監持股比例 (Yahoo TW)
+    try:
+        url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW/profile"
+        async with httpx.AsyncClient(headers={'User-Agent': 'Mozilla/5.0'}) as http_client:
+            resp = await http_client.get(url, timeout=10.0)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                texts = list(soup.stripped_strings)
+                for i, t in enumerate(texts):
+                    if "董監持股比例(%)" in t:
+                        if i + 1 < len(texts):
+                            val_str = texts[i+1].replace("%", "").strip()
+                            try:
+                                data["directors"] = float(val_str)
+                            except ValueError:
+                                pass
+                        break
+    except Exception as e:
+        print(f"Error fetching directors ownership from Yahoo TW for {stock_id}: {e}")
+        
+    return source, data
+

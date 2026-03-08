@@ -25,6 +25,7 @@ import { useCompanyProfile } from '../hooks/useCompanyProfile';
 import { useDividends } from '../hooks/useDividends';
 import { useRevenueMix } from '../hooks/useRevenueMix';
 import { useValuationMetrics } from '../hooks/useValuationMetrics';
+import { useOwnershipData } from '../hooks/useOwnershipData';
 import CompanyNews from '../components/CompanyNews';
 
 const MetricCard = ({ category, items }: { category: string; items: any[] }) => {
@@ -617,33 +618,102 @@ const PeerComparison = () => {
   );
 };
 
-const OwnershipSummary = () => {
-  const data = MOCK_OWNERSHIP_DATA;
+const OwnershipSummary = ({ stockId }: { stockId: string }) => {
+  const { data, isLoading, error } = useOwnershipData(stockId);
 
-  const renderBar = (label: string, value: number, colorClass: string, bgClass: string) => (
-    <div className="mb-4 last:mb-0">
-      <div className="flex justify-between text-sm mb-1.5">
-        <span className="text-textMuted">{label}</span>
-        <span className="text-white font-bold">{value.toFixed(2)}%</span>
-      </div>
-      <div className="w-full h-2 bg-slate-700/50 rounded-full overflow-hidden">
-        <div className={`h-full ${bgClass} rounded-full`} style={{ width: `${value}%` }}></div>
-      </div>
-    </div>
-  );
+  const pieData = data ? [
+    { name: '董監持股', value: data.directors, color: '#60a5fa', description: '主要經營團隊及大股東之持股狀況。' },
+    { name: '外資持股', value: data.foreign, color: '#34d399', description: '外國法人對於台股的信心指標。' },
+    { name: '投信持股', value: data.investmentTrust, color: '#fb7185', description: '國內資產管理公司法人部位。' },
+    { name: '其他', value: Math.max(0, 100 - data.directors - data.foreign - data.investmentTrust), color: '#475569', description: '散戶與其他未揭露之法人持股。' }
+  ] : [];
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const pData = payload[0].payload;
+      return (
+        <div className="bg-surfaceLight border border-slate-600 p-3 rounded-lg shadow-xl shadow-black/50 z-50">
+          <div className="font-bold text-white flex items-center gap-2 mb-1">
+            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: pData.color }}></span>
+            {pData.name}: {pData.value.toFixed(2)}%
+          </div>
+          <div className="text-xs text-textMuted max-w-[200px]">
+            {pData.description}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
-    <div className="bg-surface border border-surfaceLight rounded-xl p-6">
+    <div className="bg-surface border border-surfaceLight rounded-xl p-6 relative">
       <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
         <Icon name="groups" className="text-indigo-400" />
         股權與籌碼摘要
       </h3>
-      <div className="mt-2 text-xs text-textMuted mb-5">營建股通常具有法人持股比例偏低，董監與大股東持股較為穩定的特性。</div>
-      <div className="space-y-2">
-        {renderBar('董監持股', data.directors, 'text-blue-400', 'bg-blue-500')}
-        {renderBar('外資持股', data.foreign, 'text-emerald-400', 'bg-emerald-500')}
-        {renderBar('投信持股', data.investmentTrust, 'text-rose-400', 'bg-rose-500')}
-      </div>
+
+      {isLoading ? (
+        <div className="space-y-4 animate-pulse pt-4">
+          <div className="h-48 w-48 mx-auto bg-surfaceLight rounded-full"></div>
+          <div className="flex justify-center gap-4 mt-6">
+            <div className="h-4 w-16 bg-surfaceLight rounded"></div>
+            <div className="h-4 w-16 bg-surfaceLight rounded"></div>
+            <div className="h-4 w-16 bg-surfaceLight rounded"></div>
+          </div>
+        </div>
+      ) : error || !data ? (
+        <div className="py-12 text-center">
+          <span className="text-textMuted text-sm">暫無股權資料</span>
+        </div>
+      ) : (
+        <div className="h-[300px] w-full mt-2 pb-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="45%"
+                innerRadius={65}
+                outerRadius={90}
+                paddingAngle={4}
+                dataKey="value"
+                stroke="none"
+              >
+                {pieData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.color}
+                    className="hover:opacity-80 hover:-translate-y-1 hover:drop-shadow-md transition-all duration-300 cursor-pointer"
+                    style={{ outline: 'none' }}
+                  />
+                ))}
+              </Pie>
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Legend
+                verticalAlign="bottom"
+                height={36}
+                content={(props) => {
+                  const { payload } = props;
+                  return (
+                    <ul className="flex flex-wrap justify-center gap-x-5 gap-y-3 mt-4">
+                      {payload?.map((entry, index) => (
+                        <li key={`item-${index}`} className="flex items-center text-sm">
+                          <span className="w-3.5 h-3.5 rounded-full mr-2" style={{ backgroundColor: entry.color }}></span>
+                          <span className="text-textMuted">{entry.value}</span>
+                          <span className="text-white font-medium ml-1.5">
+                            {pieData[index].value.toFixed(1)}%
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 };
@@ -779,7 +849,7 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
         </div>
 
         <div className="lg:col-span-1 space-y-6">
-          <OwnershipSummary />
+          <OwnershipSummary stockId={stockId} />
 
           <div className="bg-surface border border-surfaceLight rounded-xl p-6 h-fit">
             <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
