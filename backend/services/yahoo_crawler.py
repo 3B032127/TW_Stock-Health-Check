@@ -248,6 +248,10 @@ class YahooStockCrawler:
             import yfinance as yf
             import re
             
+            from .finmind import FinMindClient
+            from datetime import datetime
+            from dateutil.relativedelta import relativedelta
+            
             ticker_symbol = f"{stock_id}.TW"
             ticker = yf.Ticker(ticker_symbol)
             info = ticker.info
@@ -299,6 +303,50 @@ class YahooStockCrawler:
                 else:
                     calculated_capital = f"{capital_val / 10000:,.0f} 萬"
 
+            # 取得月營收
+            finmind = FinMindClient()
+            now = datetime.now()
+            start_date = (now - relativedelta(months=14)).strftime("%Y-%m-%d")
+            end_date = now.strftime("%Y-%m-%d")
+            
+            revenue_data = []
+            try:
+                # Assuming this executes inside an async function
+                revenue_data = await finmind.fetch_month_revenue(stock_id, start_date, end_date)
+            except Exception as e:
+                print(f"Fetch revenue error: {e}")
+            finally:
+                await finmind.close()
+
+            monthly_revenue = {'value': 'N/A', 'yoy': 0}
+            if revenue_data:
+                latest_revenue = revenue_data[-1]
+                rev_value = latest_revenue.get('revenue', 0)
+                if rev_value > 0:
+                    monthly_revenue['value'] = f"{rev_value / 100000000:,.2f}"
+
+                if len(revenue_data) > 1:
+                    last_year_rev = next((r.get('revenue') for r in revenue_data if r.get('revenue_year') == latest_revenue.get('revenue_year', 0) - 1 and r.get('revenue_month') == latest_revenue.get('revenue_month')), None)
+                    if last_year_rev and last_year_rev > 0:
+                        monthly_revenue['yoy'] = round(((rev_value - last_year_rev) / last_year_rev) * 100, 2)
+            
+            # 取得 EPS 與三率 (轉換為百分比格式)
+            eps = info.get('trailingEps', 'N/A')
+            if eps != 'N/A':
+                eps = f"{eps:.2f}"
+                
+            gross_margin = info.get('grossMargins', 0) * 100 if info.get('grossMargins') else 0
+            operating_margin = info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0
+            net_margin = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
+
+            financial_highlights = {
+                'monthlyRevenue': monthly_revenue,
+                'eps': eps,
+                'grossMargin': gross_margin,
+                'operatingMargin': operating_margin,
+                'netMargin': net_margin
+            }
+
             profile = {
                 'id': stock_id,
                 'name': stock_name or info.get('longName', ''),
@@ -312,7 +360,8 @@ class YahooStockCrawler:
                 'capital': calculated_capital,
                 'website': info.get('website', 'N/A'),
                 'marketCap': market_cap,
-                'fullTimeEmployees': info.get('fullTimeEmployees', 'N/A')
+                'fullTimeEmployees': info.get('fullTimeEmployees', 'N/A'),
+                'financialHighlights': financial_highlights
             }
             
             return profile

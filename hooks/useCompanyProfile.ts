@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
+import { FinancialHighlightsData } from '../types';
 
 export interface CompanyProfile {
     id: string;
@@ -15,6 +16,7 @@ export interface CompanyProfile {
     website: string;
     marketCap: number;
     fullTimeEmployees: number | string;
+    financialHighlights?: FinancialHighlightsData;
 }
 
 export const useCompanyProfile = (stockId: string) => {
