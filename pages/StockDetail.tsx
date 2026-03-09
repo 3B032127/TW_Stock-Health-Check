@@ -391,9 +391,10 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
             <span className={`text-3xl font-bold z-10 ${priceColorClass}`}>{data.price.toFixed(2)}</span>
             <span className="text-sm text-textMuted mb-1 z-10">TWD</span>
           </div>
-          <div className="absolute bottom-4 right-4 z-0">
-            <SparklineChart data={data.sparklineData} />
+          <div className="absolute bottom-4 right-4 z-0 opacity-40 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+            <SparklineChart data={data.sparklineData} color={isPriceUp ? '#ef4444' : isPriceDown ? '#10b981' : '#135bec'} />
           </div>
+          <div className={`mt-2 text-xs px-2 py-1 rounded w-fit font-medium relative z-10 ${priceTag.textClass} ${priceTag.bgClass}`}>{priceTag.text}</div>
         </div>
 
         <div
