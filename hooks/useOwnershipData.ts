@@ -5,6 +5,11 @@ export interface OwnershipData {
     directors: number;
     foreign: number;
     investmentTrust: number;
+    totalShares?: number;
+    foreignLimit?: number;
+    directorPledgeRatio?: number;
+    retailRatio?: number;
+    majorShareholdersCount?: number;
 }
 
 interface OwnershipResponse {
