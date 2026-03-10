@@ -297,6 +297,264 @@ async def read_stock_valuation(stock_id: str):
         await client.close()
 
 
+@app.get("/api/v1/stock/{stock_id}/peers")
+async def read_stock_peers(stock_id: str):
+    """獲取同業比較資料"""
+    global stock_list_cache
+    from .services.finmind import FinMindClient
+    import asyncio
+    from datetime import datetime, timedelta
+    
+    # 1. 確保有 stock_list
+    if stock_list_cache is None:
+        client = FinMindClient()
+        try:
+            data = await client.fetch_stock_info()
+            if data:
+                stock_list_cache = data
+        except Exception as e:
+            print(f"Error fetching stock info list: {e}")
+        finally:
+            await client.close()
+            
+    if not stock_list_cache:
+        return {"status": "error", "message": "股票清單獲取失敗", "data": {"industry": "未知", "peers": []}}
+        
+    # 2. 找到目標股票的產業
+    target_industry = None
+    target_info = None
+    for stock in stock_list_cache:
+        if stock.get("stock_id") == stock_id:
+            target_industry = stock.get("industry_category")
+            target_info = stock
+            break
+            
+    if not target_industry:
+        return {"status": "success", "source": "finmind", "data": {"industry": "未知 (或查無此股)", "peers": []}}
+        
+    # 3. 找出同產業的股票
+    same_industry_peers = [s for s in stock_list_cache if s.get("industry_category") == target_industry and len(s.get("stock_id", "")) == 4 and s.get("type") in ("twse", "tpex")]
+    
+    candidate_peers = []
+    
+    for p in same_industry_peers:
+        if p.get("stock_id") != stock_id and p not in candidate_peers:
+            candidate_peers.append(p)
+        # 抽取 25 檔同業，因為其中可能包含下市股票 (如 5854, 6012 等零報價標的)
+        if len(candidate_peers) >= 25:
+            break
+            
+    # 4. 針對這些股票抓取股價與 PE
+    client = FinMindClient()
+    try:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        # 將追溯期從 30 天延長至 60 天，以便涵蓋流動性極低的冷門股
+        start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+        
+        async def fetch_stock_data(peer_id):
+            per_data = await client.fetch_per(peer_id, start_date, end_date)
+            price_data = await client.fetch_price(peer_id, start_date, end_date)
+            
+            latest_price = price_data[-1].get("close", 0) if price_data else 0
+            
+            # 若為 0 代表該股可能已下市或完全無流動性，拋出異常以便後續過濾
+            if latest_price <= 0:
+                raise ValueError(f"Stock {peer_id} has no valid price.")
+            
+            # 尋找最近一筆有效的 PER, PBR, Yield
+            latest_per = 0
+            latest_pbr = 0
+            latest_yield = 0
+            
+            if per_data:
+                # 由後往前找，有時候可能單天沒資料
+                for d in reversed(per_data):
+                    if d.get("PER", 0) > 0 and latest_per == 0:
+                        latest_per = d.get("PER", 0)
+                    if d.get("PBR", 0) > 0 and latest_pbr == 0:
+                        latest_pbr = d.get("PBR", 0)
+                    if d.get("dividend_yield", 0) > 0 and latest_yield == 0:
+                        latest_yield = d.get("dividend_yield", 0)
+                    
+                    if latest_per and latest_pbr and latest_yield:
+                        break
+                        
+                # 如果仍為 0，直接取最後一筆的數值 (可能本身就是0)
+                if latest_per == 0 and per_data:
+                    latest_per = per_data[-1].get("PER", 0)
+                if latest_pbr == 0 and per_data:
+                    latest_pbr = per_data[-1].get("PBR", 0)
+                if latest_yield == 0 and per_data:
+                    latest_yield = per_data[-1].get("dividend_yield", 0)
+            
+            import random
+            market_cap = round(random.uniform(100.0, 5000.0), 1)
+            ps_ratio = round(random.uniform(0.5, 10.0), 2)
+            
+            return {
+                "id": peer_id,
+                "price": latest_price,
+                "peRatio": latest_per if latest_per > 0 else None,
+                "pbRatio": latest_pbr,
+                "dividendYield": latest_yield,
+                "marketCap": market_cap,
+                "psRatio": ps_ratio
+            }
+            
+        # 把 target 獨立算進第一位，再加入候選名單
+        tasks = [fetch_stock_data(stock_id)]
+        tasks.extend([fetch_stock_data(p["stock_id"]) for p in candidate_peers])
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        peer_data_list = []
+        
+        for i, res in enumerate(results):
+            import random
+            
+            current_peer_info = target_info if i == 0 else candidate_peers[i - 1]
+            
+            if isinstance(res, Exception):
+                print(f"Skipping peer {current_peer_info.get('stock_id')} due to error/no price: {res}")
+                # 如果是目標自己的查詢報出了異常，保留帶 0 的紀錄避免徹底炸裂
+                if i == 0:
+                    peer_data = {
+                        "id": current_peer_info.get("stock_id"),
+                        "name": current_peer_info.get("stock_name", "未知"),
+                        "price": 0,
+                        "peRatio": None,
+                        "pbRatio": 0,
+                        "dividendYield": 0,
+                        "marketCap": 0,
+                        "psRatio": 0
+                    }
+                else:
+                    # 如果不是主股票又沒有價格，直接拋棄這個同業名單
+                    continue
+            else:
+                peer_data = {
+                    "id": res["id"],
+                    "name": current_peer_info.get("stock_name", "未知"),
+                    "price": res.get("price", 0),
+                    "peRatio": res.get("peRatio"),
+                    "pbRatio": res.get("pbRatio", 0),
+                    "dividendYield": res.get("dividendYield", 0),
+                    "marketCap": res.get("marketCap", 0),
+                    "psRatio": res.get("psRatio", 0)
+                }
+                
+            # Appending Industry Mock Data
+            if target_industry == '營建業':
+                peer_data["contractLiabilitiesYoY"] = round(random.uniform(-10.0, 30.0), 2)
+                peer_data["debtRatio"] = round(random.uniform(40.0, 80.0), 2)
+                peer_data['netMargin'] = round(random.uniform(10.0, 30.0), 2)
+                peer_data['projectGrossMargin'] = round(random.uniform(20.0, 45.0), 2)
+                peer_data['inventoryToAssetsRatio'] = round(random.uniform(30.0, 70.0), 2)
+            elif target_industry == '半導體業':
+                peer_data["grossMargin"] = round(random.uniform(20.0, 60.0), 2)
+                peer_data["inventoryTurnoverDays"] = random.randint(30, 120)
+                peer_data["rdExpenseRatio"] = round(random.uniform(5.0, 20.0), 2)
+            elif target_industry == '金融保險業':
+                peer_data["roa"] = round(random.uniform(0.5, 2.0), 2)
+                peer_data["nplRatio"] = round(random.uniform(0.1, 1.0), 2)
+                peer_data['roe'] = round(random.uniform(5.0, 15.0), 2)
+                peer_data['netIncomeYoY'] = round(random.uniform(-10.0, 40.0), 2)
+                peer_data['capitalAdequacyRatio'] = round(random.uniform(10.0, 20.0), 2)
+                
+            # 通用 Mock 特性與跨產業的安全防護 (Fallback Defaults)
+            default_values = {
+                'operatingMargin': round(random.uniform(5.0, 30.0), 2),
+                'revenueYoY': round(random.uniform(-10.0, 50.0), 2),
+                'epsYoY': round(random.uniform(-20.0, 100.0), 2),
+                'currentRatio': round(random.uniform(100.0, 250.0), 2),
+                'institutionalOwnership': round(random.uniform(10.0, 80.0), 2),
+                'debtRatio': round(random.uniform(20.0, 80.0), 2),
+                'grossMargin': round(random.uniform(15.0, 50.0), 2),
+                'inventoryTurnoverDays': random.randint(30, 120),
+                'rdExpenseRatio': round(random.uniform(1.0, 15.0), 2),
+                'contractLiabilitiesYoY': round(random.uniform(-5.0, 20.0), 2),
+                'netMargin': round(random.uniform(5.0, 25.0), 2),
+                'projectGrossMargin': round(random.uniform(15.0, 40.0), 2),
+                'inventoryToAssetsRatio': round(random.uniform(20.0, 60.0), 2),
+                'roa': round(random.uniform(0.5, 3.0), 2),
+                'roe': round(random.uniform(5.0, 20.0), 2),
+                'nplRatio': round(random.uniform(0.1, 1.5), 2),
+                'netIncomeYoY': round(random.uniform(-10.0, 30.0), 2),
+                'capitalAdequacyRatio': round(random.uniform(10.0, 25.0), 2)
+            }
+            
+            for k, v in default_values.items():
+                if k not in peer_data:
+                    peer_data[k] = v
+                    
+            peer_data_list.append(peer_data)
+            
+            # 當收齊包含自己在內的 5 檔有效同業即中止處理
+            if len(peer_data_list) >= 5:
+                break
+                
+        # Compute Industry Averages
+        valid_pe = [p["peRatio"] for p in peer_data_list if p["peRatio"] is not None and p["peRatio"] > 0]
+        valid_pb = [p["pbRatio"] for p in peer_data_list if p["pbRatio"] > 0]
+        valid_yield = [p["dividendYield"] for p in peer_data_list if p["dividendYield"] > 0]
+        valid_ps = [p["psRatio"] for p in peer_data_list if p["psRatio"] > 0]
+        
+        industry_average = {
+            "peRatio": sum(valid_pe) / len(valid_pe) if valid_pe else 0,
+            "pbRatio": sum(valid_pb) / len(valid_pb) if valid_pb else 0,
+            "dividendYield": sum(valid_yield) / len(valid_yield) if valid_yield else 0,
+            "psRatio": sum(valid_ps) / len(valid_ps) if valid_ps else 0,
+            "id": "AVG",
+            "name": "產業均值"
+        }
+
+        def get_avg(key):
+            vals = [p[key] for p in peer_data_list if key in p]
+            return sum(vals) / len(vals) if vals else 0
+            
+        if target_industry == '營建業':
+            industry_average['contractLiabilitiesYoY'] = get_avg('contractLiabilitiesYoY')
+            industry_average['debtRatio'] = get_avg('debtRatio')
+            industry_average['netMargin'] = round(random.uniform(10.0, 30.0), 2)
+            industry_average['projectGrossMargin'] = round(random.uniform(20.0, 45.0), 2)
+            industry_average['inventoryToAssetsRatio'] = round(random.uniform(30.0, 70.0), 2)
+            
+        elif target_industry == '半導體業':
+            industry_average['grossMargin'] = get_avg('grossMargin')
+            industry_average['inventoryTurnoverDays'] = get_avg('inventoryTurnoverDays')
+            industry_average['rdExpenseRatio'] = get_avg('rdExpenseRatio')
+            
+        elif target_industry == '金融保險業':
+            industry_average['roa'] = get_avg('roa')
+            industry_average['nplRatio'] = get_avg('nplRatio')
+            industry_average['roe'] = get_avg('roe')
+            industry_average['netIncomeYoY'] = get_avg('netIncomeYoY')
+            industry_average['capitalAdequacyRatio'] = get_avg('capitalAdequacyRatio')
+
+        # 通用 Mock 特性與跨產業的安全防護
+        industry_average['operatingMargin'] = round(sum([p.get('operatingMargin', random.uniform(5.0, 30.0)) for p in peer_data_list]) / len(peer_data_list), 2)
+        industry_average['revenueYoY'] = round(sum([p.get('revenueYoY', random.uniform(-10.0, 50.0)) for p in peer_data_list]) / len(peer_data_list), 2)
+        industry_average['epsYoY'] = round(sum([p.get('epsYoY', random.uniform(-20.0, 100.0)) for p in peer_data_list]) / len(peer_data_list), 2)
+        industry_average['currentRatio'] = round(sum([p.get('currentRatio', random.uniform(100.0, 250.0)) for p in peer_data_list]) / len(peer_data_list), 2)
+        industry_average['institutionalOwnership'] = round(sum([p.get('institutionalOwnership', random.uniform(10.0, 80.0)) for p in peer_data_list]) / len(peer_data_list), 2)
+        
+        for k in default_values.keys():
+            if k not in industry_average:
+                industry_average[k] = get_avg(k)
+
+        return {
+            "status": "success",
+            "source": "finmind",
+            "data": {
+                "industry": target_industry,
+                "peers": peer_data_list,
+                "industryAverage": industry_average
+            }
+        }
+    finally:
+        await client.close()
+
+
 @app.get("/api/v1/stock/{stock_id}/revenue-mix")
 async def read_stock_revenue_mix(stock_id: str):
     import hashlib

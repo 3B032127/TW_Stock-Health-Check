@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, LineChart, Line, Legend, CartesianGrid, PieChart, Pie, AreaChart, Area } from 'recharts';
+import { BarChart, Bar, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, LineChart, Line, Legend, CartesianGrid, PieChart, Pie, AreaChart, Area, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 import { Icon } from '../App';
 import { AIAnalysisCard } from '../components/AIAnalysisCard';
 import {
@@ -26,6 +26,8 @@ import { useDividends } from '../hooks/useDividends';
 import { useRevenueMix } from '../hooks/useRevenueMix';
 import { useValuationMetrics } from '../hooks/useValuationMetrics';
 import { useOwnershipData } from '../hooks/useOwnershipData';
+import { usePeerComparison } from '../hooks/usePeerComparison';
+import { DynamicPeerComparison } from '../components/DynamicPeerComparison';
 import CompanyNews from '../components/CompanyNews';
 
 const MetricCard = ({ category, items }: { category: string; items: any[] }) => {
@@ -692,40 +694,36 @@ const FinancialHighlights = ({ data }: { data?: FinancialHighlightsData }) => {
   );
 };
 
-const PeerComparison = () => {
-  const peers = MOCK_PEER_COMPARISON;
+const PeerComparisonSection = ({ stockId }: { stockId: string }) => {
+  const { data, isLoading, error } = usePeerComparison(stockId);
+
+  if (isLoading) {
+    return (
+      <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex items-center justify-center animate-pulse min-h-[200px]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-textMuted text-sm">載入同業資料中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data || !data.peers || data.peers.length === 0) {
+    return (
+      <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col items-center justify-center min-h-[200px]">
+        <Icon name="compare_arrows" className="text-4xl text-surfaceLight mb-2" />
+        <span className="text-textMuted text-sm">暫無同業比較資料</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-surface border border-surfaceLight rounded-xl overflow-hidden">
-      <div className="p-4 border-b border-surfaceLight bg-surfaceLight/30 flex justify-between items-center">
-        <h3 className="font-bold text-white flex items-center gap-2">
-          <Icon name="compare_arrows" className="text-blue-400" />
-          同業比較 (營建業)
-        </h3>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-right">
-          <thead className="bg-surface text-textMuted border-b border-surfaceLight">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium">股票名稱</th>
-              <th className="px-4 py-3 font-medium">股價</th>
-              <th className="px-4 py-3 font-medium">本益比 (P/E)</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-surfaceLight text-white">
-            {peers.map((peer, i) => (
-              <tr key={peer.id} className={`hover:bg-surfaceLight/20 ${peer.id === '5521' ? 'bg-primary/5' : ''}`}>
-                <td className="px-4 py-3 text-left">
-                  <span className="font-bold">{peer.name}</span> <span className="text-textMuted text-xs ml-1">{peer.id}</span>
-                  {peer.id === '5521' && <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-primary/20 text-primary rounded border border-primary/20">目前</span>}
-                </td>
-                <td className="px-4 py-3 font-medium">{peer.price.toFixed(2)}</td>
-                <td className="px-4 py-3">{peer.peRatio.toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DynamicPeerComparison 
+      stockId={stockId} 
+      industrySector={data.industry} 
+      peers={data.peers} 
+      industryAverage={data.industryAverage} 
+    />
   );
 };
 
@@ -956,7 +954,7 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
             </div>
           </div>
 
-          <PeerComparison />
+          <PeerComparisonSection stockId={stockId} />
         </div>
 
         <div className="lg:col-span-1 space-y-6">

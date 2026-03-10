@@ -1,0 +1,14 @@
+--- Testing FinMind PER / PBR ---
+5854: Got 0 records from FinMind
+6012: Got 0 records from FinMind
+6004: Got 0 records from FinMind
+2833: Got 0 records from FinMind
+2881: Got 35 records from FinMind
+   Latest: Price=None, PE=11.19
+
+--- Testing Yahoo Finance --- (.TW and .TWO)
+5854: yfinance (TW) price: 0, yfinance (TWO) price: 0
+6012: yfinance (TW) price: 0, yfinance (TWO) price: 0
+6004: yfinance (TW) price: 0, yfinance (TWO) price: 0
+2833: yfinance (TW) price: 0, yfinance (TWO) price: 0
+2881: yfinance (TW) price: 88.3, yfinance (TWO) price: 0

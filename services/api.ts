@@ -110,6 +110,13 @@ export const api = {
         return response.json();
     },
 
+    getPeerComparison: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/peers`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    },
+
+
     getDividendHistory: async (stockId: string) => {
         const response = await fetch(`${API_BASE_URL}/stock/${stockId}/dividends`);
         if (!response.ok) throw new Error('Network response was not ok');
