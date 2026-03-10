@@ -102,11 +102,10 @@ const CompanyNews: React.FC<CompanyNewsProps> = ({ stockId }) => {
                 )}
             </div>
 
-            {/* Modal 區塊 */}
             {selectedNews && (
-                <div className={`fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 transition-opacity duration-300 ${isModalOpen ? 'opacity-100' : 'opacity-0'}`}>
-                    <div className="absolute inset-0 backdrop-blur-sm bg-black/70" onClick={closeModal}></div>
-                    <div className={`bg-surface rounded-xl flex flex-col w-full max-w-3xl max-h-[90vh] shadow-2xl border border-surfaceLight overflow-hidden relative transition-all duration-300 ease-out transform ${isModalOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'}`}>
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
+                    <div className={`absolute inset-0 transition-all duration-300 ease-out bg-black/70 ${isModalOpen ? 'opacity-100 backdrop-blur-sm' : 'opacity-0 backdrop-blur-none'}`} onClick={closeModal}></div>
+                    <div className={`bg-surface rounded-xl flex flex-col w-full max-w-3xl max-h-[90vh] shadow-2xl border border-surfaceLight overflow-hidden relative transition-all duration-300 ease-out transform ${isModalOpen ? 'scale-100 translate-y-0 opacity-100' : 'scale-95 translate-y-4 opacity-0'}`}>
 
                         {/* Header */}
                         <div className="p-5 border-b border-surfaceLight flex justify-between items-start sticky top-0 bg-surface z-10">

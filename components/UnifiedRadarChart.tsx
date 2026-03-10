@@ -32,7 +32,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
             const dataPoint = payload[0].payload;
 
             return (
-                <div className="bg-surface border border-surfaceLight rounded-xl p-4 shadow-xl backdrop-blur-md min-w-[200px]">
+                <div className="bg-surface border border-surfaceLight rounded-xl p-4 shadow-xl backdrop-blur-md transition-all duration-300 ease-in-out min-w-[200px]">
                     <div className="flex items-center gap-2 mb-3 border-b border-surfaceLight pb-2">
                         <span className="font-bold text-white text-lg">{dataPoint.subject}</span>
                     </div>

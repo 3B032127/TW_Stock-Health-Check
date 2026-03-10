@@ -450,9 +450,9 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
 
       {/* Modal */}
       {(activeMetric || isMounted) && modalContent && (
-        <div className={`fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 transition-opacity duration-300 ${isMounted ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCloseModal}></div>
-          <div className={`relative bg-surface border border-surfaceLight rounded-2xl w-full max-w-2xl shadow-2xl my-auto mx-auto overflow-hidden transition-all duration-300 ease-out transform ${isMounted ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'}`}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+          <div className={`absolute inset-0 bg-black/60 transition-all duration-300 ease-out ${isMounted ? 'opacity-100 backdrop-blur-sm' : 'opacity-0 backdrop-blur-none'}`} onClick={handleCloseModal}></div>
+          <div className={`relative bg-surface border border-surfaceLight rounded-2xl w-full max-w-2xl shadow-2xl my-auto mx-auto overflow-hidden transition-all duration-300 ease-out transform ${isMounted ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-4'}`}>
             {/* Header */}
             <div className="flex justify-between items-center p-5 border-b border-surfaceLight">
               <h3 className="text-xl font-bold text-white flex items-center gap-3">
@@ -718,11 +718,11 @@ const PeerComparisonSection = ({ stockId }: { stockId: string }) => {
   }
 
   return (
-    <DynamicPeerComparison 
-      stockId={stockId} 
-      industrySector={data.industry} 
-      peers={data.peers} 
-      industryAverage={data.industryAverage} 
+    <DynamicPeerComparison
+      stockId={stockId}
+      industrySector={data.industry}
+      peers={data.peers}
+      industryAverage={data.industryAverage}
     />
   );
 };
