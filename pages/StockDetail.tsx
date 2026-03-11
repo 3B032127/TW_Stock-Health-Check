@@ -271,7 +271,7 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
   }
 
   const getPeTag = (pe: number | null | undefined) => {
-    if (!pe || pe <= 0) return { text: "無資料", textClass: "text-textMuted", bgClass: "bg-surfaceLight/50", borderClass: "border-transparent" };
+    if (!pe || pe <= 0) return { text: "虧損中", textClass: "text-slate-400", bgClass: "bg-surfaceLight/50", borderClass: "border-transparent" };
     if (pe < 15) return { text: "偏低估值", textClass: "text-emerald-400", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/20" };
     if (pe > 25) return { text: "較高期待", textClass: "text-red-400", bgClass: "bg-red-500/10", borderClass: "border-red-500/20" };
     return { text: "合理區間", textClass: "text-blue-400", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/20" };
@@ -285,7 +285,7 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
   };
 
   const getYieldTag = (y: number | null | undefined) => {
-    if (!y || y <= 0) return { text: "無資料", textClass: "text-textMuted", bgClass: "bg-surfaceLight/50", borderClass: "border-transparent" };
+    if (!y || y <= 0) return { text: "無配息", textClass: "text-slate-400", bgClass: "bg-surfaceLight/50", borderClass: "border-transparent" };
     if (y > 4) return { text: "高配息", textClass: "text-amber-400", bgClass: "bg-amber-500/10", borderClass: "border-amber-500/20" };
     return { text: "穩定配息", textClass: "text-blue-400", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/20" };
   };
@@ -323,11 +323,15 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
         break;
       case 'peRatio':
         title = "本益比 (P/E Ratio)";
-        explanation = "算法為「股價 ÷ 每股盈餘 (EPS)」。用來評估買進股票後，假設公司獲利不變，需要多少年才能回本。";
-        analysis = `目前本益比為 ${data.peRatio ? data.peRatio.toFixed(1) : '-'} 倍。${peTag.text === '偏低估值' ? '處於相對便宜區間，具投資吸引力。' : '代表市場可能給予較高期待，需注意是否超漲。'}`;
+        explanation = (!data.peRatio || data.peRatio <= 0) 
+            ? "目前公司處於虧損狀態，無法計算實質本益比。" 
+            : "算法為「股價 ÷ 每股盈餘 (EPS)」。用來評估買進股票後，假設公司獲利不變，需要多少年才能回本。";
+        analysis = (!data.peRatio || data.peRatio <= 0) 
+            ? "目前公司處於虧損狀態，本益比無法給予參考。建議關注本業是否能轉虧為盈或觀察淨值比。" 
+            : `目前本益比為 ${data.peRatio.toFixed(1)} 倍。${peTag.text === '偏低估值' ? '處於相對便宜區間，具投資吸引力。' : '代表市場可能給予較高期待，需注意是否超漲。'}`;
         chartData = data.peSparkline || [];
         color = "#a855f7"; // purple
-        currentValue = `${data.peRatio ? data.peRatio.toFixed(2) : '-'} 倍`;
+        currentValue = (!data.peRatio || data.peRatio <= 0) ? `虧損中` : `${data.peRatio.toFixed(2)} 倍`;
         tag = peTag;
         break;
       case 'pbRatio':
@@ -341,11 +345,15 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
         break;
       case 'dividendYield':
         title = "現金殖利率 (Dividend Yield)";
-        explanation = "算法為「(每股發放的現金股利 ÷ 股價) × 100%」。如同銀行定存利率，用來衡量投資能獲得的被動現金流報酬。";
-        analysis = `目前殖利率為 ${data.dividendYield ? data.dividendYield.toFixed(1) : '-'}%。${yieldTag.text === '高配息' ? '屬於高配息水準，對存股族具備吸引力，能提供較好的下檔保護。' : '數值一般，需觀察未來配息是否穩定成長。'}`;
+        explanation = (!data.dividendYield || data.dividendYield <= 0) 
+            ? "目前公司未配發現金股利。" 
+            : "算法為「(每股發放的現金股利 ÷ 股價) × 100%」。如同銀行定存利率，用來衡量投資能獲得的被動現金流報酬。";
+        analysis = (!data.dividendYield || data.dividendYield <= 0) 
+            ? "目前公司未配發現金股利。若是成長型科技股，可能將資金保留作為未來投資擴張之用。" 
+            : `目前殖利率為 ${data.dividendYield.toFixed(1)}%。${yieldTag.text === '高配息' ? '屬於高配息水準，對存股族具備吸引力，能提供較好的下檔保護。' : '數值一般，需觀察未來配息是否穩定成長。'}`;
         color = "#f59e0b"; // amber
         chartData = data.yieldSparkline || [];
-        currentValue = `${data.dividendYield ? data.dividendYield.toFixed(2) : '-'} %`;
+        currentValue = (!data.dividendYield || data.dividendYield <= 0) ? `無配息` : `${data.dividendYield.toFixed(2)} %`;
         tag = yieldTag;
         break;
     }
@@ -406,8 +414,14 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
           <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-15 transition-opacity z-0 pointer-events-none"><Icon name="analytics" className="text-4xl text-purple-500" /></div>
           <p className="text-sm text-textMuted mb-2 relative z-10">本益比 (P/E)</p>
           <div className="flex items-baseline gap-2 relative z-10">
-            <span className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-fuchsia-400 bg-clip-text text-transparent">{data.peRatio ? data.peRatio.toFixed(1) : '-'}</span>
-            <span className="text-sm text-textMuted">倍</span>
+            {(!data.peRatio || data.peRatio <= 0) ? (
+                <span className="text-3xl font-bold text-slate-400">虧損中</span>
+            ) : (
+                <>
+                  <span className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-fuchsia-400 bg-clip-text text-transparent">{data.peRatio.toFixed(1)}</span>
+                  <span className="text-sm text-textMuted">倍</span>
+                </>
+            )}
           </div>
           <div className="absolute bottom-4 right-4 z-0 opacity-40 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
             <SparklineChart data={data.peSparkline || []} color="#a855f7" />
@@ -438,8 +452,14 @@ const ValuationMetrics = ({ stockId }: { stockId: string }) => {
           <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-15 transition-opacity z-0 pointer-events-none"><Icon name="savings" className="text-4xl text-amber-500" /></div>
           <p className="text-sm text-textMuted mb-2 relative z-10">現金殖利率</p>
           <div className="flex items-baseline gap-2 relative z-10">
-            <span className="text-3xl font-bold text-amber-400">{data.dividendYield ? data.dividendYield.toFixed(1) : '-'}</span>
-            <span className="text-xl font-bold text-amber-400">%</span>
+            {(!data.dividendYield || data.dividendYield <= 0) ? (
+                <span className="text-3xl font-bold text-slate-400">無配息</span>
+            ) : (
+                <>
+                  <span className="text-3xl font-bold text-amber-400">{data.dividendYield.toFixed(1)}</span>
+                  <span className="text-xl font-bold text-amber-400">%</span>
+                </>
+            )}
           </div>
           <div className="absolute bottom-4 right-4 z-0 opacity-40 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
             <SparklineChart data={data.yieldSparkline || []} color="#f59e0b" />
@@ -730,15 +750,14 @@ const PeerComparisonSection = ({ stockId }: { stockId: string }) => {
 const OwnershipSummary = ({ stockId }: { stockId: string }) => {
   const { data, isLoading, error } = useOwnershipData(stockId);
 
+  const tooltipRef = React.useRef<HTMLDivElement>(null);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
   const [tooltipState, setTooltipState] = useState<{
     visible: boolean;
-    x: number;
-    y: number;
     data: any | null;
   }>({
     visible: false,
-    x: 0,
-    y: 0,
     data: null,
   });
 
@@ -749,27 +768,32 @@ const OwnershipSummary = ({ stockId }: { stockId: string }) => {
     { name: '其他', value: Math.max(0, 100 - data.directors - data.foreign - data.investmentTrust), color: '#475569', description: '散戶與其他未揭露之法人持股。' }
   ] : [];
 
-  const handlePieEnter = (data: any, index: number) => {
-    setTooltipState((prev) => ({
-        ...prev,
+  const handlePieEnter = (data: any, index: number, e: React.MouseEvent) => {
+    setHoveredIndex(index);
+    setTooltipState({
         visible: true,
         data: data.payload || data,
-    }));
+    });
+    if (tooltipRef.current && e && e.clientX !== undefined) {
+        tooltipRef.current.style.left = `${e.clientX + 15}px`;
+        tooltipRef.current.style.top = `${e.clientY + 15}px`;
+    }
   };
 
   const handleContainerMouseMove = (e: React.MouseEvent) => {
-    setTooltipState((prev) => ({
-      ...prev,
-      x: e.clientX,
-      y: e.clientY,
-    }));
+    if (tooltipRef.current) {
+        tooltipRef.current.style.left = `${e.clientX + 15}px`;
+        tooltipRef.current.style.top = `${e.clientY + 15}px`;
+    }
   };
 
   const handlePieLeave = () => {
+    setHoveredIndex(null);
     setTooltipState((prev) => ({ ...prev, visible: false }));
   };
 
   const handleContainerMouseLeave = () => {
+    setHoveredIndex(null);
     setTooltipState((prev) => ({ ...prev, visible: false }));
   };
 
@@ -822,8 +846,14 @@ const OwnershipSummary = ({ stockId }: { stockId: string }) => {
                     <Cell
                       key={`cell-${index}`}
                       fill={entry.color}
-                      className="transition-all duration-300 ease-out cursor-pointer outline-none transform-gpu will-change-transform pointer-events-auto opacity-90 hover:opacity-100 hover:scale-110 hover:drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]"
-                      style={{ transformOrigin: '50% 45%', transformBox: 'view-box' }}
+                      className="transition-all duration-300 ease-out cursor-pointer outline-none transform-gpu will-change-transform pointer-events-auto"
+                      style={{ 
+                        transformOrigin: '50% 45%', 
+                        transformBox: 'view-box',
+                        opacity: hoveredIndex === index ? 1 : 0.9,
+                        transform: hoveredIndex === index ? 'scale(1.1)' : 'scale(1)',
+                        filter: hoveredIndex === index ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.5))' : 'none'
+                      }}
                     />
                   ))}
                 </Pie>
@@ -852,10 +882,11 @@ const OwnershipSummary = ({ stockId }: { stockId: string }) => {
 
             {/* Custom Tooltip */}
             <div
+              ref={tooltipRef}
               className={`fixed pointer-events-none z-[110] bg-surfaceLight border border-slate-600 p-3 rounded-lg shadow-xl shadow-black/50 transition-opacity duration-300 ease-in-out ${tooltipState.visible ? 'opacity-100' : 'opacity-0'}`}
               style={{
-                left: tooltipState.x + 15,
-                top: tooltipState.y + 15,
+                left: -9999, // default off screen to prevent initial flash
+                top: -9999,
                 transform: 'translate(0, 0)',
               }}
             >
@@ -1041,6 +1072,8 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          <FinancialHighlights data={profile.financialHighlights} />
+
           <div className="bg-surface border border-surfaceLight rounded-xl p-6">
             <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
               <Icon name="business" className="text-primary" />
@@ -1098,7 +1131,7 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
             </div>
           </div>
 
-          <FinancialHighlights data={profile.financialHighlights} />
+          <PeerComparisonSection stockId={stockId} />
 
           <div className="bg-surface border border-surfaceLight rounded-xl p-6">
             <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
@@ -1135,8 +1168,6 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
               </table>
             </div>
           </div>
-
-          <PeerComparisonSection stockId={stockId} />
         </div>
 
         <div className="lg:col-span-1 space-y-6">
@@ -1380,9 +1411,6 @@ const StockDetail = ({ stockId = "2330", onNavigateHome, onNavigateToStock }: { 
           </div>
           <p className="text-textMuted text-sm md:text-base max-w-2xl truncate">
             {profile ? profile.description : '公司簡介資料載入中...'}
-            <span className="block mt-1 text-xs opacity-70">
-              {profile && profile.marketCap ? `市值：${(profile.marketCap / 100000000).toFixed(2)} 億 TWD` : ''}
-            </span>
           </p>
         </div>
         <div className="flex gap-3">
