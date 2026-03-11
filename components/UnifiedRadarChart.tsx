@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { ResponsiveContainer, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, RadarChart, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { RawStockData } from '../types';
 import { calculateRadarScores } from '../utils/radarEngine';
@@ -26,59 +26,82 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
         }));
     }, [mainStock, industryAverage, industrySector]);
 
-    // Custom Tooltip component to reveal bottom-layer indicators
-    const CustomTooltip = ({ active, payload }: any) => {
-        if (active && payload && payload.length) {
-            const dataPoint = payload[0].payload;
+    // Extract tooltip content so it can be reused for static display
+    const renderTooltipContent = (dataPoint: any) => (
+        <div className="bg-surface border border-slate-600 rounded-xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.8)] min-w-[240px] z-[100] relative backdrop-blur-none">
+            <div className="flex items-center gap-2 mb-3 border-b border-surfaceLight pb-3">
+                <span className="font-bold text-white text-xl">{dataPoint.subject}</span>
+            </div>
 
-            return (
-                <div className="bg-surface border border-surfaceLight rounded-xl p-4 shadow-xl backdrop-blur-md transition-all duration-300 ease-in-out min-w-[200px]">
-                    <div className="flex items-center gap-2 mb-3 border-b border-surfaceLight pb-2">
-                        <span className="font-bold text-white text-lg">{dataPoint.subject}</span>
+            <div className="space-y-4">
+                {/* Scores */}
+                <div className="flex flex-col gap-2 text-base bg-surfaceLight/30 p-3 rounded-lg">
+                    <div className="flex justify-between items-center text-primary">
+                        <span className="font-medium">個股得分</span>
+                        <span className="font-bold text-lg">{dataPoint.mainScore} 分</span>
                     </div>
-
-                    <div className="space-y-3">
-                        {/* Scores */}
-                        <div className="flex flex-col gap-1 text-sm bg-surfaceLight/20 p-2 rounded-lg">
-                            <div className="flex justify-between items-center text-primary">
-                                <span className="font-medium">個股得分</span>
-                                <span className="font-bold">{dataPoint.mainScore} 分</span>
-                            </div>
-                            <div className="flex justify-between items-center text-slate-400">
-                                <span className="font-medium">同業基準</span>
-                                <span className="font-bold">{dataPoint.avgScore} 分</span>
-                            </div>
-                        </div>
-
-                        {/* Underlying Metadata */}
-                        {dataPoint.metadata && dataPoint.metadata.length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-surfaceLight/50">
-                                <span className="text-xs text-textMuted font-bold uppercase tracking-wider mb-2 block">
-                                    底層指標貢獻
-                                </span>
-                                <ul className="flex flex-col gap-1.5">
-                                    {dataPoint.metadata.map((meta: { label: string, valueData: string }, i: number) => (
-                                        <li key={i} className="flex justify-between items-center text-xs">
-                                            <span className="text-slate-300">{meta.label}</span>
-                                            <span className="text-white font-mono">{meta.valueData}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
+                    <div className="flex justify-between items-center text-slate-400">
+                        <span className="font-medium">同業基準</span>
+                        <span className="font-bold text-lg">{dataPoint.avgScore} 分</span>
                     </div>
                 </div>
-            );
+
+                {/* Underlying Metadata */}
+                {dataPoint.metadata && dataPoint.metadata.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-surfaceLight/50">
+                        <span className="text-sm text-textMuted font-bold uppercase tracking-wider mb-2 block">
+                            底層指標貢獻
+                        </span>
+                        <ul className="flex flex-col gap-2">
+                            {dataPoint.metadata.map((meta: { label: string, valueData: string }, i: number) => (
+                                <li key={i} className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-300">{meta.label}</span>
+                                    <span className="text-white font-mono text-base">{meta.valueData}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    // Custom Tooltip component to reveal bottom-layer indicators (for native recharts hover)
+    const CustomTooltip = ({ active, payload }: any) => {
+        if (active && payload && payload.length) {
+            return renderTooltipContent(payload[0].payload);
         }
         return null;
     };
 
+    // State to track if mouse is over the chart area vs the explanation cards
+    const [isMouseOverChart, setIsMouseOverChart] = useState(false);
+    const [lastHoveredData, setLastHoveredData] = useState<any>(null);
+
+    const hoveredData = useMemo(() => {
+        if (!hoveredDimension) return null;
+        return radarData.find(d => d.subject === hoveredDimension);
+    }, [hoveredDimension, radarData]);
+
+    useEffect(() => {
+        if (hoveredData) {
+            setLastHoveredData(hoveredData);
+        }
+    }, [hoveredData]);
+
+    const showStaticTooltip = hoveredData && !isMouseOverChart;
+
     return (
-        <div className="flex-none h-80 border-b border-surfaceLight bg-surface/50 p-4 relative">
-            <h4 className="absolute top-4 left-4 text-sm font-bold text-textMuted uppercase tracking-wider">
+        <div 
+            className="flex-none h-80 border-b border-surfaceLight bg-surface/50 p-4 relative"
+            onMouseEnter={() => setIsMouseOverChart(true)}
+            onMouseLeave={() => setIsMouseOverChart(false)}
+        >
+            <h4 className="absolute top-4 left-4 text-sm font-bold text-textMuted uppercase tracking-wider z-10">
                 個股 vs 同業綜合滿分圖 (滿分100)
             </h4>
-            <ResponsiveContainer width="100%" height="100%">
+
+            <ResponsiveContainer width="100%" height="100%" className="relative z-10">
                 <RadarChart cx="50%" cy="55%" outerRadius="80%" data={radarData}>
                     <PolarGrid stroke="#334155" />
                     <PolarAngleAxis
@@ -98,7 +121,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
                                         textAnchor={textAnchor}
                                         dominantBaseline="central"
                                         style={{
-                                            fill: isHovered ? '#60a5fa' : '#e2e8f0',
+                                            fill: isHovered ? '#38bdf8' : '#e2e8f0',
                                             fontSize: '14px',
                                             fontWeight: 700,
                                             transform: isHovered ? 'scale(1.25)' : 'scale(1)',
@@ -119,29 +142,46 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
                         tick={false}
                         axisLine={false}
                     />
-                    <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.02)' }} />
+                    <RechartsTooltip 
+                        content={<CustomTooltip />} 
+                        cursor={{ fill: 'rgba(255,255,255,0.02)' }} 
+                        wrapperStyle={{ zIndex: 1000 }} 
+                    />
                     <Radar
                         name="同業平均"
                         dataKey="avgScore"
-                        stroke="#94a3b8"
-                        fill="#94a3b8"
-                        fillOpacity={0.3}
+                        stroke="#64748b"
+                        fill="#64748b"
+                        fillOpacity={0.15}
+                        strokeDasharray="4 4"
                     />
                     <Radar
                         name="當前個股"
                         dataKey="mainScore"
-                        stroke="#3b82f6"
-                        fill="#3b82f6"
-                        fillOpacity={0.5}
+                        stroke="#38bdf8"
+                        fill="#38bdf8"
+                        fillOpacity={0.55}
+                        strokeWidth={2}
                     />
                     <Legend
                         verticalAlign="bottom"
                         height={20}
                         iconType="circle"
-                        wrapperStyle={{ fontSize: '14px', paddingTop: '10px' }}
+                        wrapperStyle={{ fontSize: '14px', paddingTop: '10px', zIndex: 1 }}
                     />
                 </RadarChart>
             </ResponsiveContainer>
+
+            {/* Static overlay tooltip for when cards are hovered from below */}
+            <div 
+                className={`absolute top-4 z-[9999] pointer-events-none transition-opacity duration-300 drop-shadow-2xl ${showStaticTooltip ? 'opacity-100' : 'opacity-0'} ${
+                    lastHoveredData && (lastHoveredData.subject === '估值水準' || lastHoveredData.subject === '籌碼與股息') 
+                        ? 'left-4 right-auto' 
+                        : 'right-4 left-auto'
+                }`}
+            >
+                {lastHoveredData ? renderTooltipContent(lastHoveredData) : null}
+            </div>
         </div>
     );
 };

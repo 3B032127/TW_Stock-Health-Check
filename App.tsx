@@ -23,22 +23,25 @@ const Header = ({
   onNavigateToStock: (stockId: string) => void;
 }) => {
   return (
-    <header className="sticky top-0 z-50 flex items-center justify-between border-b border-surfaceLight bg-background/80 backdrop-blur-md px-4 py-3 lg:px-6">
-      <div className="flex items-center gap-3 cursor-pointer" onClick={() => onChangeView(ViewState.DASHBOARD)}>
-        <div className="flex size-8 items-center justify-center rounded bg-primary text-white">
-          <Icon name="candlestick_chart" className="text-[20px]" />
+    <header className="sticky top-0 z-50 border-b border-surfaceLight bg-background/80 backdrop-blur-md">
+      <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between px-4 py-3 lg:px-6">
+        <div className="flex flex-1 items-center gap-6 lg:gap-10">
+          <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => onChangeView(ViewState.DASHBOARD)}>
+            <div className="flex size-8 items-center justify-center rounded bg-primary text-white">
+              <Icon name="candlestick_chart" className="text-[20px]" />
+            </div>
+            <h2 className="hidden md:block text-lg font-bold leading-tight tracking-tight text-white whitespace-nowrap">
+              台股財報健檢系統
+            </h2>
+          </div>
+
+          <div className="hidden sm:block w-full max-w-md">
+            <SearchBar onNavigateToStock={onNavigateToStock} />
+          </div>
         </div>
-        <h2 className="hidden md:block text-lg font-bold leading-tight tracking-tight text-white">
-          台股財報健檢系統
-        </h2>
-      </div>
 
-      <div className="flex-1 max-w-md px-4 hidden sm:block">
-        <SearchBar onNavigateToStock={onNavigateToStock} />
-      </div>
-
-      <nav className="flex items-center gap-6">
-        <div className="hidden md:flex items-center gap-6">
+        <nav className="flex items-center gap-6 shrink-0">
+          <div className="hidden md:flex items-center gap-6">
           <button
             onClick={() => onChangeView(ViewState.DASHBOARD)}
             className={`text-sm font-medium transition-colors ${currentView === ViewState.DASHBOARD ? 'text-primary' : 'text-textMuted hover:text-white'}`}
@@ -65,7 +68,8 @@ const Header = ({
           <Icon name="person" className="text-[20px]" />
         </button>
       </nav>
-    </header>
+    </div>
+  </header>
   );
 };
 
