@@ -221,9 +221,9 @@ export const MOCK_FINANCIAL_HIGHLIGHTS: FinancialHighlightsData = {
 };
 
 export const MOCK_PEER_COMPARISON: PeerComparisonData[] = [
-  { id: '5521', name: '工信', price: 18.25, peRatio: 15.2 },
-  { id: '5522', name: '遠雄', price: 78.50, peRatio: 12.5 },
-  { id: '2597', name: '潤弘', price: 165.00, peRatio: 16.8 },
+  { id: '5521', name: '工信', price: 18.25, peRatio: 15.2, pbRatio: 1.1, dividendYield: 4.2, marketCap: 120 },
+  { id: '5522', name: '遠雄', price: 78.50, peRatio: 12.5, pbRatio: 1.3, dividendYield: 5.0, marketCap: 380 },
+  { id: '2597', name: '潤弘', price: 165.00, peRatio: 16.8, pbRatio: 1.8, dividendYield: 7.0, marketCap: 420 },
 ];
 
 export const MOCK_OWNERSHIP_DATA: OwnershipData = {

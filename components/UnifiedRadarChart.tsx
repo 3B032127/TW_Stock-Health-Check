@@ -1,30 +1,32 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { ResponsiveContainer, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, RadarChart, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { RawStockData } from '../types';
-import { calculateRadarScores } from '../utils/radarEngine';
+import { calculateRadarScores, selectPeerSamplePool } from '../utils/radarEngine';
 
 interface Props {
     mainStock: RawStockData;
-    industryAverage: RawStockData;
+    peerPool: RawStockData[];
     industrySector: string;
     hoveredDimension?: string | null;
     setHoveredDimension?: (dim: string | null) => void;
 }
 
-export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage, industrySector, hoveredDimension, setHoveredDimension }) => {
+export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, industrySector, hoveredDimension, setHoveredDimension }) => {
     const radarData = useMemo(() => {
-        // Compute scores 0-100 for main stock and industry avg using the unified engine
-        const mainScores = calculateRadarScores(mainStock, industrySector);
-        const avgScores = calculateRadarScores(industryAverage, industrySector);
+        // Select the sample pool (closest by market cap)
+        const samplePool = selectPeerSamplePool(mainStock, peerPool, 10);
+        
+        // Compute PR scores 0-100 for main stock using the unified dynamic engine
+        const mainScores = calculateRadarScores(mainStock, samplePool, industrySector);
 
         // Merge them into one data array for Recharts
-        return mainScores.map((ms, i) => ({
+        return mainScores.map((ms) => ({
             subject: ms.subject,
             mainScore: ms.score,
-            avgScore: avgScores[i]?.score || 0,
+            avgScore: 50, // Dynamic PR System implies Benchmark is always Median (50)
             metadata: ms.metadata // Keep metadata on the data object for Tooltip access
         }));
-    }, [mainStock, industryAverage, industrySector]);
+    }, [mainStock, peerPool, industrySector]);
 
     // Extract tooltip content so it can be reused for static display
     const renderTooltipContent = (dataPoint: any) => (
@@ -41,7 +43,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
                         <span className="font-bold text-lg">{dataPoint.mainScore} 分</span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400">
-                        <span className="font-medium">同業基準</span>
+                        <span className="font-medium">同業標竿 (PR 中位數)</span>
                         <span className="font-bold text-lg">{dataPoint.avgScore} 分</span>
                     </div>
                 </div>
@@ -98,7 +100,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
             onMouseLeave={() => setIsMouseOverChart(false)}
         >
             <h4 className="absolute top-4 left-4 text-sm font-bold text-textMuted uppercase tracking-wider z-10">
-                個股 vs 同業綜合滿分圖 (滿分100)
+                動態同業對標雷達圖 (PR 百分位數)
             </h4>
 
             <ResponsiveContainer width="100%" height="100%" className="relative z-10">
@@ -148,7 +150,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, industryAverage,
                         wrapperStyle={{ zIndex: 1000 }} 
                     />
                     <Radar
-                        name="同業平均"
+                        name="同業標竿 (PR 中位數)"
                         dataKey="avgScore"
                         stroke="#64748b"
                         fill="#64748b"

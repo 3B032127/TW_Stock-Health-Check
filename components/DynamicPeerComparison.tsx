@@ -182,11 +182,11 @@ export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, 
             </div>
 
             {/* Unified Radar Chart Section */}
-            {currentStock && industryAverage && (
+            {currentStock && peers.length > 0 && (
                 <>
                     <UnifiedRadarChart
                         mainStock={currentStock as any}
-                        industryAverage={industryAverage as any}
+                        peerPool={peers as any}
                         industrySector={industrySector}
                         hoveredDimension={hoveredDimension}
                         setHoveredDimension={setHoveredDimension}
