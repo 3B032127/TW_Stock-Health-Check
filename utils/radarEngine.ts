@@ -26,51 +26,59 @@ export const selectPeerSamplePool = (
     return sortedPeers.slice(0, maxCount);
 };
 
-// Percentage Rank (PR) Calculation
-export const calculatePR = (value: number, poolValues: number[], isReverse: boolean): number => {
-    if (poolValues.length === 0) return 0;
+// Min-Max Normalization Engine (20-100 range)
+export const calculateMinMaxScore = (
+    value: number, 
+    min: number, 
+    max: number, 
+    isReverse: boolean
+): number => {
+    if (max === min) return 50; // Edge case: all same
 
-    const sorted = [...poolValues].sort((a, b) => a - b);
-    const belowCount = sorted.filter(v => v < value).length;
-    const equalCount = sorted.filter(v => v === value).length;
-
-    let pr = ((belowCount + 0.5 * equalCount) / poolValues.length) * 100;
-
+    let score: number;
     if (isReverse) {
-        pr = 100 - pr;
+        // Negative Indicator (Lower is better: e.g. PE, Debt Ratio)
+        score = 20 + ((max - value) / (max - min)) * 80;
+    } else {
+        // Positive Indicator (Higher is better: e.g. Gross Margin, ROA)
+        score = 20 + ((value - min) / (max - min)) * 80;
     }
-
-    return Math.round(pr);
+    
+    return Math.round(Math.max(20, Math.min(100, score)));
 };
 
 // Statistical Engine: Median
-export const calculateMedian = (values: number[]): number => {
+export const calculateMedianValues = (pool: RawStockData[], field: string): number => {
+    const values = pool
+        .map(p => p[field as keyof RawStockData])
+        .filter((v): v is number => typeof v === 'number');
+    
     if (values.length === 0) return 0;
     const sorted = [...values].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
-    if (sorted.length % 2 === 0) {
-        return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-    }
-    return Math.round(sorted[mid]);
+    return sorted.length % 2 === 0 
+        ? (sorted[mid - 1] + sorted[mid]) / 2 
+        : sorted[mid];
 };
 
-// Main scoring calculation
+// Main scoring calculation (Min-Max Based)
 export const calculateRadarScores = (
     mainStock: RawStockData,
     peerPool: RawStockData[],
     industrySector: string
-): RadarChartScore[] => {
+): { targetScores: RadarChartScore[], benchmarkScores: RadarChartScore[] } => {
     const mapping = getIndustryMapping(industrySector);
-    
-    // Include main stock in the sample pool for PR calculation
     const fullPool = [mainStock, ...peerPool];
-    const scores: RadarChartScore[] = [];
+    
+    const targetScores: RadarChartScore[] = [];
+    const benchmarkScores: RadarChartScore[] = [];
 
     const dimensions = ['獲利能力', '成長動能', '財務安全', '估值水準', '籌碼與股息'];
 
     dimensions.forEach(dim => {
         const configs = mapping[dim] || [];
-        const dimPRs: number[] = [];
+        const dimTargetScores: number[] = [];
+        const dimBenchmarkScores: number[] = [];
         const metadata: RadarMetricMetadata[] = [];
 
         configs.forEach(config => {
@@ -85,31 +93,41 @@ export const calculateRadarScores = (
                     if (field === 'psRatio') label = '股價營收比 (P/S)';
                     if (field === 'pbRatio') label = '股價淨值比 (P/B)';
                     
-                    if (mainStock.peRatio === null || mainStock.peRatio === undefined || mainStock.peRatio <= 0) {
-                        metadata.push({ label: '本益比 (P/E)', valueData: '虧損 / NA' });
-                    } else {
-                        metadata.push({ label: '本益比 (P/E)', valueData: `${mainStock.peRatio.toFixed(2)} 倍` });
-                    }
+                    const peVal = mainStock.peRatio;
+                    metadata.push({ 
+                        label: '本益比 (P/E)', 
+                        valueData: (peVal === null || peVal === undefined || peVal <= 0) ? '虧損 / NA' : `${peVal.toFixed(2)} 倍` 
+                    });
                 }
             }
 
-            const validPool = fullPool.filter(p => typeof p[field] === 'number');
-            const poolValues = validPool.map(p => Number(p[field]));
+            const validPool = fullPool.filter(p => typeof p[field as keyof RawStockData] === 'number');
+            const poolValues = validPool.map(p => Number(p[field as keyof RawStockData]));
             
-            const mainValue = mainStock[field];
+            if (poolValues.length > 0) {
+                const max = Math.max(...poolValues);
+                const min = Math.min(...poolValues);
+                
+                // Target Score
+                const targetValue = mainStock[field as keyof RawStockData];
+                if (typeof targetValue === 'number') {
+                    dimTargetScores.push(calculateMinMaxScore(targetValue, min, max, config.isReverse));
+                    metadata.push({ label, valueData: formatMetricValue(field as string, targetValue) });
+                }
 
-            if (typeof mainValue === 'number') {
-                const prScore = calculatePR(mainValue, poolValues, config.isReverse);
-                dimPRs.push(prScore);
-                metadata.push({ label, valueData: formatMetricValue(field as string, mainValue) });
-            } else {
-                metadata.push({ label, valueData: '-' });
+                // Benchmark Score (Median of 5 peers)
+                const benchmarkRawValue = calculateMedianValues(peerPool, field as string);
+                dimBenchmarkScores.push(calculateMinMaxScore(benchmarkRawValue, min, max, config.isReverse));
             }
         });
 
-        const score = calculateMedian(dimPRs);
-        scores.push({ subject: dim, score, metadata });
+        // Use Average of indices PR for dimension score (or median)
+        // We use average here to smooth out the 20-100 mapping results
+        const getAvg = (arr: number[]) => arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 50;
+
+        targetScores.push({ subject: dim, score: getAvg(dimTargetScores), metadata });
+        benchmarkScores.push({ subject: dim, score: getAvg(dimBenchmarkScores), metadata: [] });
     });
 
-    return scores;
+    return { targetScores, benchmarkScores };
 };

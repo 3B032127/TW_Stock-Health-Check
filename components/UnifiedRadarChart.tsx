@@ -13,52 +13,69 @@ interface Props {
 
 export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, industrySector, hoveredDimension, setHoveredDimension }) => {
     const radarData = useMemo(() => {
+        const today = new Date().toISOString().split('T')[0];
+        const cacheKey = `radar_peers_${mainStock.id}_${today}`;
+        
+        // 嘗試從 sessionStorage 讀取快取
+        const cachedData = sessionStorage.getItem(cacheKey);
+        if (cachedData) {
+            try {
+                return JSON.parse(cachedData);
+            } catch (e) {
+                console.error("Cache parsing error:", e);
+            }
+        }
+
         // Select the sample pool (closest by market cap)
         const samplePool = selectPeerSamplePool(mainStock, peerPool, 10);
         
-        // Compute PR scores 0-100 for main stock using the unified dynamic engine
-        const mainScores = calculateRadarScores(mainStock, samplePool, industrySector);
+        // Compute Min-Max scores 20-100 for main stock and benchmark using the unified dynamic engine
+        const { targetScores, benchmarkScores } = calculateRadarScores(mainStock, samplePool, industrySector);
 
         // Merge them into one data array for Recharts
-        return mainScores.map((ms) => ({
-            subject: ms.subject,
-            mainScore: ms.score,
-            avgScore: 50, // Dynamic PR System implies Benchmark is always Median (50)
-            metadata: ms.metadata // Keep metadata on the data object for Tooltip access
+        const finalData = targetScores.map((ts, index) => ({
+            subject: ts.subject,
+            mainScore: ts.score,
+            avgScore: benchmarkScores[index].score, // Dynamic Benchmark Score (not always 50)
+            metadata: ts.metadata // Keep metadata on the data object for Tooltip access
         }));
+
+        // 寫入快取
+        sessionStorage.setItem(cacheKey, JSON.stringify(finalData));
+        return finalData;
     }, [mainStock, peerPool, industrySector]);
 
     // Extract tooltip content so it can be reused for static display
     const renderTooltipContent = (dataPoint: any) => (
-        <div className="bg-surface border border-slate-600 rounded-xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.8)] min-w-[240px] z-[100] relative backdrop-blur-none">
-            <div className="flex items-center gap-2 mb-3 border-b border-surfaceLight pb-3">
-                <span className="font-bold text-white text-xl">{dataPoint.subject}</span>
+        <div className="bg-surface border border-slate-600 rounded-xl p-3 shadow-[0_0_20px_rgba(0,0,0,0.8)] min-w-[200px] z-[100] relative backdrop-blur-none">
+            <div className="flex items-center gap-2 mb-2 border-b border-surfaceLight pb-2">
+                <span className="font-bold text-white text-lg">{dataPoint.subject}</span>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-2">
                 {/* Scores */}
-                <div className="flex flex-col gap-2 text-base bg-surfaceLight/30 p-3 rounded-lg">
+                <div className="flex flex-col gap-1 text-sm bg-surfaceLight/30 p-2 rounded-lg">
                     <div className="flex justify-between items-center text-primary">
                         <span className="font-medium">個股得分</span>
-                        <span className="font-bold text-lg">{dataPoint.mainScore} 分</span>
+                        <span className="font-bold">{dataPoint.mainScore} 分</span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400">
-                        <span className="font-medium">同業標竿 (PR 中位數)</span>
-                        <span className="font-bold text-lg">{dataPoint.avgScore} 分</span>
+                        <span className="font-medium text-xs">同業標竿 (PR)</span>
+                        <span className="font-bold">{dataPoint.avgScore} 分</span>
                     </div>
                 </div>
 
                 {/* Underlying Metadata */}
                 {dataPoint.metadata && dataPoint.metadata.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-surfaceLight/50">
-                        <span className="text-sm text-textMuted font-bold uppercase tracking-wider mb-2 block">
-                            底層指標貢獻
+                    <div className="mt-2 pt-2 border-t border-surfaceLight/50">
+                        <span className="text-[10px] text-textMuted font-bold uppercase tracking-wider mb-1 block">
+                            底層指標數據
                         </span>
-                        <ul className="flex flex-col gap-2">
+                        <ul className="flex flex-col gap-1">
                             {dataPoint.metadata.map((meta: { label: string, valueData: string }, i: number) => (
-                                <li key={i} className="flex justify-between items-center text-sm">
-                                    <span className="text-slate-300">{meta.label}</span>
-                                    <span className="text-white font-mono text-base">{meta.valueData}</span>
+                                <li key={i} className="flex justify-between items-center text-[11px]">
+                                    <span className="text-slate-400">{meta.label}</span>
+                                    <span className="text-white font-mono">{meta.valueData}</span>
                                 </li>
                             ))}
                         </ul>
@@ -105,6 +122,16 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
 
             <ResponsiveContainer width="100%" height="100%" className="relative z-10">
                 <RadarChart cx="50%" cy="55%" outerRadius="80%" data={radarData}>
+                    <defs>
+                        <linearGradient id="radarMainGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.8}/>
+                            <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.2}/>
+                        </linearGradient>
+                        <linearGradient id="radarAvgGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.5}/>
+                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.1}/>
+                        </linearGradient>
+                    </defs>
                     <PolarGrid stroke="#334155" />
                     <PolarAngleAxis
                         dataKey="subject"
@@ -123,7 +150,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
                                         textAnchor={textAnchor}
                                         dominantBaseline="central"
                                         style={{
-                                            fill: isHovered ? '#38bdf8' : '#e2e8f0',
+                                            fill: isHovered ? '#22d3ee' : '#e2e8f0',
                                             fontSize: '14px',
                                             fontWeight: 700,
                                             transform: isHovered ? 'scale(1.25)' : 'scale(1)',
@@ -150,20 +177,22 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
                         wrapperStyle={{ zIndex: 1000 }} 
                     />
                     <Radar
-                        name="同業標竿 (PR 中位數)"
+                        name="同業標竿 (均值)"
                         dataKey="avgScore"
-                        stroke="#64748b"
-                        fill="#64748b"
-                        fillOpacity={0.15}
+                        stroke="#f59e0b"
+                        fill="url(#radarAvgGradient)"
+                        fillOpacity={1}
+                        strokeWidth={2}
                         strokeDasharray="4 4"
                     />
                     <Radar
                         name="當前個股"
                         dataKey="mainScore"
-                        stroke="#38bdf8"
-                        fill="#38bdf8"
-                        fillOpacity={0.55}
-                        strokeWidth={2}
+                        stroke="#22d3ee"
+                        fill="url(#radarMainGradient)"
+                        fillOpacity={1}
+                        strokeWidth={3}
+                        dot={{ r: 4, fill: '#22d3ee', strokeWidth: 2, stroke: '#0f172a' }}
                     />
                     <Legend
                         verticalAlign="bottom"
