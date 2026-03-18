@@ -27,6 +27,7 @@ import { useRevenueMix } from '../hooks/useRevenueMix';
 import { useValuationMetrics } from '../hooks/useValuationMetrics';
 import { useOwnershipData } from '../hooks/useOwnershipData';
 import { usePeerComparison } from '../hooks/usePeerComparison';
+import { useFinancials } from '../hooks/useFinancials';
 import { DynamicPeerComparison } from '../components/DynamicPeerComparison';
 import CompanyNews from '../components/CompanyNews';
 
@@ -116,41 +117,37 @@ const MetricCard = ({ category, items }: { category: string; items: any[] }) => 
 
 // --- Financial Components ---
 
-const FinancialChart = ({ subTab }: { subTab: FinancialSubTab }) => {
+const FinancialChart = ({ subTab, chartData }: { subTab: FinancialSubTab, chartData: any[] }) => {
   let title = '';
-  let data: any[] = [];
   let bars = null;
 
   switch (subTab) {
     case FinancialSubTab.INCOME:
       title = '季度營收與淨利趨勢';
-      data = REVENUE_DATA;
       bars = (
         <>
-          <Bar dataKey="revenue" name="營業收入" fill="#135bec" radius={[2, 2, 0, 0]} barSize={30} />
-          <Bar dataKey="netIncome" name="稅後淨利" fill="#06b6d4" radius={[2, 2, 0, 0]} barSize={30} />
+          <Bar dataKey="revenue" name="營業收入(億)" fill="#135bec" radius={[2, 2, 0, 0]} barSize={30} />
+          <Bar dataKey="netIncome" name="稅後淨利(億)" fill="#06b6d4" radius={[2, 2, 0, 0]} barSize={30} />
         </>
       );
       break;
     case FinancialSubTab.BALANCE:
       title = '資產、負債與權益趨勢';
-      data = BALANCE_SHEET_CHART_DATA;
       bars = (
         <>
-          <Bar dataKey="assets" name="總資產" fill="#10b981" radius={[2, 2, 0, 0]} barSize={20} />
-          <Bar dataKey="equity" name="股東權益" fill="#3b82f6" radius={[2, 2, 0, 0]} barSize={20} />
-          <Bar dataKey="liabilities" name="總負債" fill="#ef4444" radius={[2, 2, 0, 0]} barSize={20} />
+          <Bar dataKey="assets" name="總資產(億)" fill="#10b981" radius={[2, 2, 0, 0]} barSize={20} />
+          <Bar dataKey="equity" name="股東權益(億)" fill="#3b82f6" radius={[2, 2, 0, 0]} barSize={20} />
+          <Bar dataKey="liabilities" name="總負債(億)" fill="#ef4444" radius={[2, 2, 0, 0]} barSize={20} />
         </>
       );
       break;
     case FinancialSubTab.CASH_FLOW:
       title = '現金流量趨勢';
-      data = CASH_FLOW_CHART_DATA;
       bars = (
         <>
-          <Bar dataKey="operating" name="營業現金流" fill="#10b981" radius={[2, 2, 0, 0]} barSize={20} />
-          <Bar dataKey="investing" name="投資現金流" fill="#f59e0b" radius={[2, 2, 0, 0]} barSize={20} />
-          <Bar dataKey="financing" name="籌資現金流" fill="#6366f1" radius={[2, 2, 0, 0]} barSize={20} />
+          <Bar dataKey="operating" name="營業現金流(億)" fill="#10b981" radius={[2, 2, 0, 0]} barSize={20} />
+          <Bar dataKey="investing" name="投資現金流(億)" fill="#f59e0b" radius={[2, 2, 0, 0]} barSize={20} />
+          <Bar dataKey="financing" name="籌資現金流(億)" fill="#6366f1" radius={[2, 2, 0, 0]} barSize={20} />
         </>
       );
       break;
@@ -166,7 +163,7 @@ const FinancialChart = ({ subTab }: { subTab: FinancialSubTab }) => {
       </div>
       <div className="h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} barGap={4}>
+          <BarChart data={chartData} barGap={4}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
             <XAxis dataKey="quarter" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
             <RechartsTooltip
@@ -183,7 +180,7 @@ const FinancialChart = ({ subTab }: { subTab: FinancialSubTab }) => {
   );
 };
 
-const FinancialTable = ({ data }: { data: any[] }) => (
+const FinancialTable = ({ headers, rows }: { headers: string[], rows: any[] }) => (
   <div className="bg-surface border border-surfaceLight rounded-xl overflow-hidden">
     <div className="p-4 border-b border-surfaceLight flex justify-between items-center">
       <h3 className="text-white text-lg font-bold">詳細財務數據</h3>
@@ -194,24 +191,22 @@ const FinancialTable = ({ data }: { data: any[] }) => (
         <thead className="bg-surfaceLight text-textMuted">
           <tr>
             <th className="px-6 py-4 text-left font-medium sticky left-0 bg-surfaceLight z-10 border-r border-surfaceLight">項目</th>
-            <th className="px-6 py-4 font-medium min-w-[100px]">2024 Q1</th>
-            <th className="px-6 py-4 font-medium min-w-[100px]">2023 Q4</th>
-            <th className="px-6 py-4 font-medium min-w-[100px]">2023 Q3</th>
-            <th className="px-6 py-4 font-medium min-w-[100px]">2023 Q2</th>
-            <th className="px-6 py-4 font-medium min-w-[100px]">2023 Q1</th>
+            {headers.map((h, i) => (
+              <th key={i} className="px-6 py-4 font-medium min-w-[100px]">{h}</th>
+            ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-surfaceLight">
-          {data.map((row, i) => (
+          {rows.map((row, i) => (
             <tr key={i} className={`hover:bg-surfaceLight/30 transition-colors ${row.highlight ? 'bg-surfaceLight/10' : ''}`}>
-              <td className={`px-6 py-4 text-left font-medium sticky left-0 z-10 border-r border-surfaceLight ${row.highlight ? 'text-primary' : row.item.includes('EPS') || row.item.includes('淨利') || row.item.includes('總計') ? 'text-white font-bold' : 'text-textMuted'} ${row.highlight ? 'bg-[#182336]' : 'bg-surface'}`}>
+              <td className={`px-6 py-4 text-left font-medium sticky left-0 z-10 border-r border-surfaceLight ${row.highlight ? 'text-primary' : row.item.includes('EPS') || row.item.includes('淨利') || row.item.includes('總計') || row.item.includes('合計') || row.item.includes('現金流量') ? 'text-white font-bold' : 'text-textMuted'} ${row.highlight ? 'bg-[#182336]' : 'bg-surface'}`}>
                 {row.item}
               </td>
-              <td className={`px-6 py-4 ${row.highlight ? 'text-primary font-bold' : 'text-white'}`}>{row.q1}</td>
-              <td className="px-6 py-4 text-textMuted">{row.q4}</td>
-              <td className="px-6 py-4 text-textMuted">{row.q3}</td>
-              <td className="px-6 py-4 text-textMuted">{row.q2}</td>
-              <td className="px-6 py-4 text-textMuted">{row.q1_prev}</td>
+              {row.values.map((val: string, j: number) => (
+                <td key={j} className={`px-6 py-4 ${row.highlight && j === 0 ? 'text-primary font-bold' : j === 0 ? 'text-white' : 'text-textMuted'}`}>
+                  {val}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -1452,6 +1447,7 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
   const [activeTab, setActiveTab] = useState<StockTab>(StockTab.PROFILE); // Default set to PROFILE
   const [activeSubTab, setActiveSubTab] = useState<FinancialSubTab>(FinancialSubTab.INCOME);
   const { data: profile } = useCompanyProfile(stockId);
+  const { data: financialsData, isLoading: isFinancialsLoading } = useFinancials(stockId);
 
   // Reset tabs when stockId changes (e.g., from searching a new stock)
   useEffect(() => {
@@ -1608,32 +1604,48 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
       {activeTab === StockTab.FINANCIALS && (
         <div className="flex flex-col gap-6">
           {/* Sub Navigation */}
-          <div className="flex gap-2 p-1 bg-surfaceLight rounded-lg w-fit">
-            {[
-              { id: FinancialSubTab.INCOME, label: '綜合損益表' },
-              { id: FinancialSubTab.BALANCE, label: '資產負債表' },
-              { id: FinancialSubTab.CASH_FLOW, label: '現金流量表' }
-            ].map((sub) => (
-              <button
-                key={sub.id}
-                onClick={() => setActiveSubTab(sub.id)}
-                className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${activeSubTab === sub.id
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-textMuted hover:text-white'
-                  }`}
-              >
-                {sub.label}
-              </button>
-            ))}
+          <div className="flex justify-between items-center w-full">
+            <div className="flex gap-2 p-1 bg-surfaceLight rounded-lg w-fit">
+              {[
+                { id: FinancialSubTab.INCOME, label: '綜合損益表' },
+                { id: FinancialSubTab.BALANCE, label: '資產負債表' },
+                { id: FinancialSubTab.CASH_FLOW, label: '現金流量表' }
+              ].map((sub) => (
+                <button
+                  key={sub.id}
+                  onClick={() => setActiveSubTab(sub.id)}
+                  className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${activeSubTab === sub.id
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-textMuted hover:text-white'
+                    }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+            {isFinancialsLoading && (
+              <div className="text-sm text-textMuted animate-pulse flex items-center gap-2">
+                <Icon className="text-[18px]" name="sync" /> 資料載入中...
+              </div>
+            )}
           </div>
 
+          {!isFinancialsLoading && financialsData && (
+            <>
+              <FinancialChart 
+                subTab={activeSubTab} 
+                chartData={
+                  activeSubTab === FinancialSubTab.INCOME ? financialsData?.income?.chartData || [] : 
+                  activeSubTab === FinancialSubTab.BALANCE ? financialsData?.balance?.chartData || [] : 
+                  financialsData?.cashFlow?.chartData || []
+                } 
+              />
 
-
-          <FinancialChart subTab={activeSubTab} />
-
-          {activeSubTab === FinancialSubTab.INCOME && <FinancialTable data={FINANCIAL_TABLE_DATA} />}
-          {activeSubTab === FinancialSubTab.BALANCE && <FinancialTable data={BALANCE_SHEET_TABLE_DATA} />}
-          {activeSubTab === FinancialSubTab.CASH_FLOW && <FinancialTable data={CASH_FLOW_TABLE_DATA} />}
+              {activeSubTab === FinancialSubTab.INCOME && financialsData.income && <FinancialTable headers={financialsData.income.tableData.headers} rows={financialsData.income.tableData.rows} />}
+              {activeSubTab === FinancialSubTab.BALANCE && financialsData.balance && <FinancialTable headers={financialsData.balance.tableData.headers} rows={financialsData.balance.tableData.rows} />}
+              {activeSubTab === FinancialSubTab.CASH_FLOW && financialsData.cashFlow && <FinancialTable headers={financialsData.cashFlow.tableData.headers} rows={financialsData.cashFlow.tableData.rows} />}
+            </>
+          )}
 
           {/* AI Analysis */}
           <AIAnalysisCard type="financial" title="財務數據趨勢解讀" defaultExpanded={true} />

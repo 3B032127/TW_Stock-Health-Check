@@ -35,14 +35,16 @@ def map_income_statement(stock_id, year, quarter, data_list):
         return None
 
     for d in related_data:
-        t = d['type']
-        v = d['value']
-        if t == '营业收入': item.revenue = v
-        if t == '营业毛利（毛損）': item.gross_profit = v
-        if t == '营业利益（損失）': item.operating_income = v
-        if t == '稅前淨利（淨損）': item.pre_tax_income = v
-        if t == '本期淨利（淨損）': item.net_income = v
-        if t == '基本每股盈餘（元）': item.eps = v
+        t = d.get('type', '')
+        n = d.get('origin_name', '')
+        v = d.get('value')
+        
+        if t == 'Revenue' or '營業收入' in n: item.revenue = v
+        elif t == 'GrossProfit' or '營業毛利' in n: item.gross_profit = v
+        elif t == 'OperatingIncome' or '營業利益' in n: item.operating_income = v
+        elif t in ['PreTaxIncome', 'IncomeBeforeTax'] or '稅前淨利' in n: item.pre_tax_income = v
+        elif t == 'IncomeAfterTaxes' or '本期淨利' in n: item.net_income = v
+        elif t == 'EPS' or '每股盈餘' in n: item.eps = v
         
     return item
 
@@ -55,20 +57,21 @@ def map_balance_sheet(stock_id, year, quarter, data_list):
     if not related_data: return None
 
     for d in related_data:
-        t = d['type']
-        v = d['value']
-        # Map based on PRD
-        if t == 'CashAndCashEquivalents': item.cash_equivalents = v
-        if t == 'AccountsReceivableNet': item.accounts_receivable = v
-        if t == 'Inventories': item.inventories = v
-        if t == 'CurrentAssets': item.current_assets = v
-        if t == 'PropertyPlantAndEquipment': item.fixed_assets = v
-        if t == 'TotalAssets': item.total_assets = v
-        if t == 'CurrentLiabilities': item.current_liabilities = v
-        if t == 'NoncurrentLiabilities': item.long_term_liabilities = v
-        if t == 'Liabilities': item.total_liabilities = v
-        if t == 'EquityAttributableToOwnersOfParent': item.shareholders_equity = v
-        if t == 'Equity': item.net_assets = v
+        t = d.get('type', '')
+        n = d.get('origin_name', '')
+        v = d.get('value')
+        
+        if t == 'CashAndCashEquivalents' or '現金及約當現金' in n: item.cash_equivalents = v
+        elif t == 'AccountsReceivableNet' or '應收帳款' in n: item.accounts_receivable = v
+        elif t == 'Inventories' or '存貨' in n: item.inventories = v
+        elif t == 'CurrentAssets' or '流動資產' in n: item.current_assets = v
+        elif t == 'PropertyPlantAndEquipment' or '不動產、廠房及設備' in n: item.fixed_assets = v
+        elif t == 'TotalAssets' or '資產總計' in n or '資產總額' in n: item.total_assets = v
+        elif t == 'CurrentLiabilities' or '流動負債' in n: item.current_liabilities = v
+        elif t == 'NoncurrentLiabilities' or '非流動負債' in n: item.long_term_liabilities = v
+        elif t == 'Liabilities' or '負債總' in n: item.total_liabilities = v
+        elif t == 'EquityAttributableToOwnersOfParent' or '歸屬於母公司' in n: item.shareholders_equity = v
+        elif t == 'Equity' or '權益總' in n: item.net_assets = v
         
     return item
 
@@ -81,23 +84,18 @@ def map_cash_flow(stock_id, year, quarter, data_list):
     if not related_data: return None
 
     for d in related_data:
-        t = d['type']
-        v = d['value']
-        if t == 'CashFlowsFromOperatingActivities': item.operating_cash_flow = v
-        if t == 'CashProvidedByInvestingActivities': item.investing_cash_flow = v
-        if t == 'CashFlowsProvidedFromFinancingActivities': item.financing_cash_flow = v
-        if t == 'PropertyAndPlantAndEquipment': item.capex = v # Usually negative in investing, or separate item
-        if t == 'CashBalancesEndOfPeriod': item.ending_cash_balance = v
+        t = d.get('type', '')
+        n = d.get('origin_name', '')
+        v = d.get('value')
+        
+        if 'OperatingActivities' in t or '營業活動之淨現金' in n: item.operating_cash_flow = v
+        elif 'InvestingActivities' in t or '投資活動之淨現金' in n: item.investing_cash_flow = v
+        elif 'FinancingActivities' in t or '籌資活動之淨現金' in n: item.financing_cash_flow = v
+        elif t == 'PropertyAndPlantAndEquipment' or '取得不動產' in n: item.capex = v
+        elif t == 'CashBalancesEndOfPeriod' or '期末現金' in n: item.ending_cash_balance = v
 
-    # Calculate Free Cash Flow
     if item.operating_cash_flow is not None and item.capex is not None:
-        item.free_cash_flow = item.operating_cash_flow + item.capex # Capex is usually negative? Need to check FinMind.
-        # PRD Note 2: FinMind Capex usually negative. 
-        # If it comes from Investing Activities 'Purchase of PPE', it is negative.
-        # But 'PropertyAndPlantAndEquipment' might be the asset value? 
-        # Actually in Cash Flow, it's usually 'Acquisition of property, plant and equipment'.
-        # Assuming FinMind uses standard accounting, acquisition is negative.
-        # So FCF = OCF + Capex (if negative)
+        item.free_cash_flow = item.operating_cash_flow + item.capex
     
     return item
 
@@ -184,3 +182,67 @@ async def get_cash_flow(db: Session, stock_id: str, year: int, quarter: int):
             db.rollback()
             return "api", None
     return "api", None
+
+
+async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: int, model_class, map_func, dataset: str):
+    db_items = db.query(model_class).filter_by(stock_id=stock_id)\
+                 .order_by(model_class.year.desc(), model_class.quarter.desc()).limit(limit).all()
+    
+    # If we have enough history in DB, just return
+    if len(db_items) >= limit:
+        return "db", db_items
+    
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    # Fetch past 4 years to ensure covering up to 12-16 quarters
+    start_date = (datetime.now() - timedelta(days=365*4)).strftime("%Y-%m-%d")
+    
+    client = FinMindClient()
+    data_list = await client.fetch_data(dataset, stock_id, start_date, end_date)
+    await client.close()
+    
+    if not data_list:
+        return "api", db_items
+
+    # Identify all (year, quarter) present in data_list
+    found_dates = set(d['date'] for d in data_list)
+    for date_str in sorted(list(found_dates), reverse=True):
+        try:
+            year = int(date_str[0:4])
+            month = date_str[5:7]
+            if month == "03": quarter = 1
+            elif month == "06": quarter = 2
+            elif month == "09": quarter = 3
+            elif month == "12": quarter = 4
+            else: continue
+            
+            # Check if this quarter exists in DB
+            existing = db.query(model_class).filter_by(stock_id=stock_id, year=year, quarter=quarter).first()
+            if not existing:
+                new_item = map_func(stock_id, year, quarter, data_list)
+                if new_item:
+                    db.add(new_item)
+        except Exception:
+            continue
+            
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error saving financial history: {e}")
+        
+    final_items = db.query(model_class).filter_by(stock_id=stock_id)\
+                    .order_by(model_class.year.desc(), model_class.quarter.desc()).limit(limit).all()
+    
+    source = "api" if len(final_items) > len(db_items) else "db"
+    return source, final_items
+
+
+async def get_income_statement_history(db: Session, stock_id: str, limit: int = 8):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.FinancialStatement, map_income_statement, "TaiwanStockFinancialStatements")
+
+async def get_balance_sheet_history(db: Session, stock_id: str, limit: int = 8):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.BalanceSheet, map_balance_sheet, "TaiwanStockBalanceSheet")
+
+async def get_cash_flow_history(db: Session, stock_id: str, limit: int = 8):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.CashFlowStatement, map_cash_flow, "TaiwanStockCashFlowsStatement")
+

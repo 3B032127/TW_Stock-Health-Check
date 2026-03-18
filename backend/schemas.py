@@ -8,33 +8,33 @@ class FinancialBase(BaseModel):
     quarter: int
 
 class IncomeStatement(FinancialBase):
-    revenue: Optional[int]
-    gross_profit: Optional[int]
-    operating_income: Optional[int]
-    pre_tax_income: Optional[int]
-    net_income: Optional[int]
+    revenue: Optional[float]
+    gross_profit: Optional[float]
+    operating_income: Optional[float]
+    pre_tax_income: Optional[float]
+    net_income: Optional[float]
     eps: Optional[float]
 
 class BalanceSheet(FinancialBase):
-    cash_equivalents: Optional[int]
-    accounts_receivable: Optional[int]
-    inventories: Optional[int]
-    current_assets: Optional[int]
-    fixed_assets: Optional[int]
-    total_assets: Optional[int]
-    current_liabilities: Optional[int]
-    long_term_liabilities: Optional[int]
-    total_liabilities: Optional[int]
-    shareholders_equity: Optional[int]
-    net_assets: Optional[int]
+    cash_equivalents: Optional[float]
+    accounts_receivable: Optional[float]
+    inventories: Optional[float]
+    current_assets: Optional[float]
+    fixed_assets: Optional[float]
+    total_assets: Optional[float]
+    current_liabilities: Optional[float]
+    long_term_liabilities: Optional[float]
+    total_liabilities: Optional[float]
+    shareholders_equity: Optional[float]
+    net_assets: Optional[float]
 
 class CashFlowStatement(FinancialBase):
-    operating_cash_flow: Optional[int]
-    investing_cash_flow: Optional[int]
-    financing_cash_flow: Optional[int]
-    capex: Optional[int]
-    free_cash_flow: Optional[int]
-    ending_cash_balance: Optional[int]
+    operating_cash_flow: Optional[float]
+    investing_cash_flow: Optional[float]
+    financing_cash_flow: Optional[float]
+    capex: Optional[float]
+    free_cash_flow: Optional[float]
+    ending_cash_balance: Optional[float]
 
 class MarketIndicator(BaseModel):
     """Individual market indicator"""
