@@ -347,13 +347,39 @@ class YahooStockCrawler:
                 'netMargin': net_margin
             }
 
+            # 處理公司簡介: 優先使用中文爬取結果，若無則翻譯英文，最後截斷至簡短
+            raw_desc = chinese_profile.get('公司簡介')
+            if not raw_desc:
+                eng_desc = info.get('longBusinessSummary')
+                if eng_desc:
+                    try:
+                        from deep_translator import GoogleTranslator
+                        def translate_text(text):
+                            return GoogleTranslator(source='auto', target='zh-TW').translate(text[:800])
+                        # 非同步執行翻譯避免阻塞
+                        raw_desc = await asyncio.to_thread(translate_text, eng_desc)
+                    except Exception as e:
+                        print(f"Translation failed for {stock_id}: {e}")
+                        raw_desc = eng_desc
+                else:
+                    raw_desc = "暫無公司簡介。"
+
+            # 確保簡介內容簡短 (例如最多 120 字)
+            if raw_desc and len(raw_desc) > 120:
+                trunc_desc = raw_desc[:120]
+                # 嘗試在句段處截斷，保持語意通暢
+                last_period = trunc_desc.rfind('。')
+                if last_period > 60:
+                    raw_desc = trunc_desc[:last_period+1]
+                else:
+                    raw_desc = trunc_desc + "..."
+
             profile = {
                 'id': stock_id,
                 'name': stock_name or info.get('longName', ''),
                 'industry': chinese_profile.get('產業類別') or info.get('industry', 'N/A'),
                 'sector': info.get('sector', 'N/A'),
-                'description': chinese_profile.get('公司簡介') or info.get('longBusinessSummary', '暫無公司簡介。'),
-                'chairman': chinese_profile.get('董事長') or chairman or 'N/A',
+                'description': raw_desc,                'chairman': chinese_profile.get('董事長') or chairman or 'N/A',
                 'ceo': chinese_profile.get('總經理') or ceo or 'N/A',
                 'foundedDate': 'N/A', # Usually not easily available without proper source
                 'listingDate': chinese_profile.get('掛牌日期', 'N/A'),

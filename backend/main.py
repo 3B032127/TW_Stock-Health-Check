@@ -140,24 +140,120 @@ async def read_stock_list():
     finally:
         await client.close()
 
+import hashlib
+from pydantic import BaseModel
 from .services import market, finance
+
+# 全域快取：用於存放股票清單與產業資訊
+stock_list_cache = None
+industry_ranking_cache = {}
+industry_ranking_cache_date = ""
+
+import yfinance as yf
+import asyncio
+from datetime import datetime
+
+async def get_market_cap(sid: str) -> float:
+    try:
+        ticker = yf.Ticker(f"{sid}.TW")
+        info = await asyncio.to_thread(lambda: ticker.info)
+        price = info.get('previousClose') or info.get('regularMarketPreviousClose')
+        shares = info.get('sharesOutstanding')
+        if price and shares:
+            return round(float(price * shares) / 100000000, 1) # 轉換為億元
+        mc = info.get('marketCap', 0)
+        return round(float(mc) / 100000000, 1) if mc > 0 else 0.0
+    except:
+        return 0.0
 
 @app.get("/api/v1/stock/{stock_id}/profile")
 async def read_stock_profile(stock_id: str):
     """獲取個別公司的詳細資料"""
     from .services.yahoo_crawler import YahooStockCrawler
+    from .services.finmind import FinMindClient
+    import asyncio
+    
+    global stock_list_cache
     
     crawler = YahooStockCrawler()
     try:
+        # 首先嘗試獲取基本資料 (最核心內容)
         profile = await crawler.get_company_profile(stock_id)
         if not profile:
             raise HTTPException(status_code=404, detail="Company profile not found")
             
+        # 初始化排名資料為預設值
+        ranking_info = {"rank": 0, "total": 0, "industry": profile.get("industry", "未知")}
+        
+        # 嘗試計算排名，失敗不應影響主畫面
+        try:
+            global stock_list_cache, industry_ranking_cache, industry_ranking_cache_date
+            
+            # 每日清空快取
+            today = datetime.now().strftime("%Y-%m-%d")
+            if industry_ranking_cache_date != today:
+                industry_ranking_cache.clear()
+                industry_ranking_cache_date = today
+
+            if stock_list_cache is None:
+                # 這裡使用短暫的 Timeout 以免卡住主請求
+                from .services.finmind import FinMindClient
+                fm_client = FinMindClient()
+                try:
+                    # 抓取股票資訊，如果超時就跳過
+                    stock_list_cache = await fm_client.fetch_stock_info()
+                finally:
+                    await fm_client.close()
+            
+            if stock_list_cache:
+                target_info = next((s for s in stock_list_cache if s.get("stock_id") == stock_id), None)
+                target_industry = target_info.get("industry_category") if target_info else profile.get("industry")
+                
+                if target_industry:
+                    # 如果快取沒有這個產業，則抓取全產業真實市值
+                    if target_industry not in industry_ranking_cache:
+                        industry_peers = [s for s in stock_list_cache 
+                                         if s.get("industry_category") == target_industry 
+                                         and len(s.get("stock_id", "")) == 4
+                                         and s.get("type") in ("twse", "tpex")]
+                        
+                        # 並行抓取所有人的市值
+                        mc_tasks = [get_market_cap(p.get("stock_id", "")) for p in industry_peers]
+                        mc_results = await asyncio.gather(*mc_tasks)
+                        
+                        valid_peers = []
+                        for i, p in enumerate(industry_peers):
+                            if mc_results[i] > 0:
+                                valid_peers.append({"stock_id": p.get("stock_id"), "mc": mc_results[i]})
+                        
+                        # 依據市值降冪排序
+                        valid_peers.sort(key=lambda x: x["mc"], reverse=True)
+                        industry_ranking_cache[target_industry] = valid_peers
+                    
+                    # 從快取取得排名
+                    cached_peers = industry_ranking_cache.get(target_industry, [])
+                    ranking_info["total"] = len(cached_peers)
+                    if ranking_info["total"] > 0:
+                        try:
+                            # 找出自己在排序中的位置 (1-indexed)
+                            rank = next(i for i, p in enumerate(cached_peers) if p["stock_id"] == stock_id) + 1
+                            ranking_info["rank"] = rank
+                        except StopIteration:
+                            ranking_info["rank"] = 0
+        except Exception as rank_err:
+            print(f"Ranking feature failed for {stock_id}: {rank_err}")
+            
+        profile["ranking"] = ranking_info
+
         return {
             "status": "success",
-            "source": "yahoo+yfinance",
+            "source": "yahoo+finmind+ranking_safe",
             "data": profile
         }
+    except Exception as e:
+        print(f"Critical error in read_stock_profile: {e}")
+        # 如果是核心邏輯報錯且有備案
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         await crawler.close()
 
@@ -338,27 +434,6 @@ async def read_stock_peers(stock_id: str):
                          and s.get("type") in ("twse", "tpex")]
     
     # 4. 取得目標股票的市值 (作為比較基準 - 使用昨日收盤價)
-    async def get_market_cap(sid):
-        try:
-            # 使用 asyncio.to_thread 避免 yfinance 阻塞事件迴圈
-            ticker = yf.Ticker(f"{sid}.TW")
-            info = await asyncio.to_thread(lambda: ticker.info)
-            # 強制使用昨日收盤價 Previous Close 確保穩定性
-            price = info.get('previousClose') or info.get('regularMarketPreviousClose')
-            shares = info.get('sharesOutstanding')
-            
-            if price and shares:
-                mc = (price * shares)
-                return round(mc / 100000000, 1) # 轉換為億元
-            
-            # Fallback to marketCap if specific fields missing
-            mc = info.get('marketCap', 0)
-            if mc > 0:
-                return round(mc / 100000000, 1)
-            return 0
-        except:
-            return 0
-
     target_mc = await get_market_cap(stock_id)
     if target_mc == 0:
         # Fallback to a random value if real market cap fails, but keep it stable for target

@@ -1074,61 +1074,8 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
         <div className="lg:col-span-2 space-y-6">
           <FinancialHighlights data={profile.financialHighlights} />
 
-          <div className="bg-surface border border-surfaceLight rounded-xl p-6">
-            <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
-              <Icon name="business" className="text-primary" />
-              基本資料
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">股票掛牌</span>
-                <span className="text-white font-medium">{profile.name} ({profile.id})</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">產業類別</span>
-                <span className="text-white font-medium">{profile.industry}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">板塊分類</span>
-                <span className="text-white font-medium">{profile.sector}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">董事長</span>
-                <span className="text-white font-medium">{profile.chairman}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">總經理</span>
-                <span className="text-white font-medium">{profile.ceo}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">實收資本額</span>
-                <span className="text-white font-medium">{profile.capital}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">成立日期</span>
-                <span className="text-white font-medium">{profile.foundedDate}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">上市日期</span>
-                <span className="text-white font-medium">{profile.listingDate}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">公司網址</span>
-                <a href={profile.website !== 'N/A' ? profile.website : '#'} target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">
-                  {profile.website !== 'N/A' ? '前往網站' : 'N/A'}
-                </a>
-              </div>
-              <div className="flex justify-between border-b border-surfaceLight pb-2">
-                <span className="text-textMuted">員工人數</span>
-                <span className="text-white font-medium">{profile.fullTimeEmployees !== 'N/A' ? `${profile.fullTimeEmployees.toLocaleString()} 人` : 'N/A'}</span>
-              </div>
-            </div>
-            <div className="mt-6">
-              <h4 className="text-sm font-bold text-textMuted mb-2">公司簡介</h4>
-              <p className="text-sm text-textMuted leading-relaxed whitespace-pre-wrap">
-                {profile.description}
-              </p>
-            </div>
+          <div className="h-[500px]">
+            <CompanyNews stockId={stockId} />
           </div>
 
           <PeerComparisonSection stockId={stockId} />
@@ -1245,13 +1192,69 @@ const CompanyProfile = ({ stockId }: { stockId: string }) => {
         </div>
 
         <div className="lg:col-span-1 space-y-6">
-          <OwnershipSummary stockId={stockId} />
+          <div className="bg-surface border border-surfaceLight rounded-xl p-6">
+            <h3 className="text-white text-md font-bold mb-4 flex items-center gap-2 border-b border-surfaceLight pb-4">
+              <Icon name="business" className="text-primary" />
+              基本資料與產業排名
+            </h3>
+            
+            <div className="space-y-5">
+              {/* 產業排名看板 */}
+              <div className="p-4 rounded-xl bg-primary/5 border border-primary/10 group hover:border-primary/30 transition-all">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] text-textMuted font-black uppercase tracking-widest">產業地位</span>
+                  <div className="px-2 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold">
+                    {profile.ranking?.industry || profile.industry}
+                  </div>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs text-textMuted">市值排名</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-primary font-black text-3xl italic drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]">
+                      #{profile.ranking?.rank || '-'}
+                    </span>
+                    <span className="text-xs text-textMuted">/ {profile.ranking?.total || '-'} 名</span>
+                  </div>
+                </div>
+              </div>
 
+              {/* 詳細屬性 */}
+              <div className="grid grid-cols-1 gap-y-3.5 px-1">
+                <div className="flex justify-between border-b border-surfaceLight/50 pb-2">
+                  <span className="text-xs text-textMuted">董事長</span>
+                  <span className="text-sm text-white font-bold">{profile.chairman}</span>
+                </div>
+                <div className="flex justify-between border-b border-surfaceLight/50 pb-2">
+                  <span className="text-xs text-textMuted">總經理</span>
+                  <span className="text-sm text-white font-bold">{profile.ceo}</span>
+                </div>
+                <div className="flex justify-between border-b border-surfaceLight/50 pb-2">
+                  <span className="text-xs text-textMuted">實收資本</span>
+                  <span className="text-sm text-white font-bold">{profile.capital}</span>
+                </div>
+                <div className="flex justify-between border-b border-surfaceLight/50 pb-2">
+                  <span className="text-xs text-textMuted">上市日期</span>
+                  <span className="text-sm text-white font-bold">{profile.listingDate}</span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span className="text-xs text-textMuted">官方網站</span>
+                  <a href={profile.website !== 'N/A' ? profile.website : '#'} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline font-bold flex items-center gap-1">
+                    點擊前往 <Icon name="open_in_new" className="text-[10px]" />
+                  </a>
+                </div>
+              </div>
 
-
-          <div className="h-[400px]">
-            <CompanyNews stockId={stockId} />
+              {/* 公司簡介小卡 */}
+              <div className="pt-4 border-t border-surfaceLight">
+                <h4 className="text-[10px] font-black text-textMuted mb-2 uppercase tracking-widest opacity-60 italic">Business Summary</h4>
+                <p className="text-xs text-textMuted leading-relaxed line-clamp-4 hover:line-clamp-none transition-all duration-300 cursor-help bg-white/[0.01] p-3 rounded-lg border border-white/5">
+                  {profile.description}
+                </p>
+              </div>
+            </div>
           </div>
+
+          <OwnershipSummary stockId={stockId} />
         </div>
       </div>
     </div>
