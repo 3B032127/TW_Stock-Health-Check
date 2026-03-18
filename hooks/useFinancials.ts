@@ -55,22 +55,22 @@ export const useFinancials = (stockId: string) => {
             // Chart Data
             const incomeChartData = incomeAsc.map((item: any) => ({
                 quarter: `${item.year % 100}Q${item.quarter}`,
-                revenue: (item.revenue || 0) / 100000000, // Show in hundred million for chart to fit nicely
-                netIncome: (item.net_income || 0) / 100000000
+                revenue: Math.round(((item.revenue || 0) / 100000000) * 100) / 100,
+                netIncome: Math.round(((item.net_income || 0) / 100000000) * 100) / 100
             }));
 
             const balanceChartData = balanceAsc.map((item: any) => ({
                 quarter: `${item.year % 100}Q${item.quarter}`,
-                assets: (item.total_assets || 0) / 100000000,
-                liabilities: (item.total_liabilities || 0) / 100000000,
-                equity: ((item.total_assets || 0) - (item.total_liabilities || 0)) / 100000000
+                assets: Math.round(((item.total_assets || 0) / 100000000) * 100) / 100,
+                liabilities: Math.round(((item.total_liabilities || 0) / 100000000) * 100) / 100,
+                equity: Math.round((((item.total_assets || 0) - (item.total_liabilities || 0)) / 100000000) * 100) / 100
             }));
 
             const cashFlowChartData = cashFlowAsc.map((item: any) => ({
                 quarter: `${item.year % 100}Q${item.quarter}`,
-                operating: (item.operating_cash_flow || 0) / 100000000,
-                investing: (item.investing_cash_flow || 0) / 100000000,
-                financing: (item.financing_cash_flow || 0) / 100000000
+                operating: Math.round(((item.operating_cash_flow || 0) / 100000000) * 100) / 100,
+                investing: Math.round(((item.investing_cash_flow || 0) / 100000000) * 100) / 100,
+                financing: Math.round(((item.financing_cash_flow || 0) / 100000000) * 100) / 100
             }));
 
             // Table headers (descending - new to old)

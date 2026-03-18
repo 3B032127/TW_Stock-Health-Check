@@ -168,8 +168,9 @@ const FinancialChart = ({ subTab, chartData }: { subTab: FinancialSubTab, chartD
             <XAxis dataKey="quarter" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
             <RechartsTooltip
               cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-              contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
-              itemStyle={{ color: '#fff' }}
+              contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '8px' }}
+              itemStyle={{ fontSize: '12px', fontWeight: '600' }}
+              formatter={(value: number) => [`${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 億元`, null]}
             />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             {bars}

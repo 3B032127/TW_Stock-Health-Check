@@ -58,6 +58,7 @@ def map_balance_sheet(stock_id, year, quarter, data_list):
 
     for d in related_data:
         t = d.get('type', '')
+        if t.endswith('_per'): continue
         n = d.get('origin_name', '')
         v = d.get('value')
         
@@ -85,6 +86,7 @@ def map_cash_flow(stock_id, year, quarter, data_list):
 
     for d in related_data:
         t = d.get('type', '')
+        if t.endswith('_per'): continue
         n = d.get('origin_name', '')
         v = d.get('value')
         
