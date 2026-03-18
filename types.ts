@@ -25,6 +25,19 @@ export interface FinancialMetric {
   status: 'pass' | 'fail' | 'neutral';
 }
 
+export interface HealthCheckCategory {
+  score: number;
+  items: FinancialMetric[];
+}
+
+export interface HealthCheckData {
+  totalScore: number;
+  profitability: HealthCheckCategory;
+  solvency: HealthCheckCategory;
+  growth: HealthCheckCategory;
+  valuation: HealthCheckCategory;
+}
+
 // --- New Interfaces for Profile Data Blocks ---
 export interface ValuationData {
   price: number;

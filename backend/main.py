@@ -650,6 +650,22 @@ async def read_chips(
         "data": {"history": items} # Simplified response structure
     }
 
+@app.get("/api/v1/stock/{stock_id}/health-check")
+async def read_stock_health_check(
+    stock_id: str,
+    db: Session = Depends(get_db)
+):
+    """獲取個股財報健檢數據"""
+    source, hc_data = await finance.calculate_health_check(db, stock_id)
+    if not hc_data:
+        raise HTTPException(status_code=404, detail="Health check data not available")
+        
+    return {
+        "status": "success",
+        "source": source,
+        "data": hc_data
+    }
+
 @app.get("/api/v1/stock/{stock_id}/ownership")
 async def read_stock_ownership(
     stock_id: str,

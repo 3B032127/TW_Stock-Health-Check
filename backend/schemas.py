@@ -81,3 +81,20 @@ class ApiResponse(BaseModel):
     status: str
     source: str
     data: Optional[dict] = None
+
+class HealthCheckMetric(BaseModel):
+    label: str
+    value: str
+    target: str
+    status: str
+
+class HealthCheckCategory(BaseModel):
+    score: int
+    items: list[HealthCheckMetric]
+
+class HealthCheckData(BaseModel):
+    totalScore: int
+    profitability: HealthCheckCategory
+    solvency: HealthCheckCategory
+    growth: HealthCheckCategory
+    valuation: HealthCheckCategory
