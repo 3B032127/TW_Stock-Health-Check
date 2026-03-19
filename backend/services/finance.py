@@ -39,12 +39,20 @@ def map_income_statement(stock_id, year, quarter, data_list):
         n = d.get('origin_name', '')
         v = d.get('value')
         
-        if t == 'Revenue' or '營業收入' in n: item.revenue = v
-        elif t == 'GrossProfit' or '營業毛利' in n: item.gross_profit = v
-        elif t == 'OperatingIncome' or '營業利益' in n: item.operating_income = v
-        elif t in ['PreTaxIncome', 'IncomeBeforeTax'] or '稅前淨利' in n: item.pre_tax_income = v
-        elif t == 'IncomeAfterTaxes' or '本期淨利' in n: item.net_income = v
-        elif t == 'EPS' or '每股盈餘' in n: item.eps = v
+        # Mapping for Income Statement
+        if t in ['Revenue', 'NetInterestIncome', 'NetNonInterestIncome'] or '營業收入' in n or '收益' in n:
+            if item.revenue is None: item.revenue = 0
+            item.revenue += v
+        elif t == 'GrossProfit' or '營業毛利' in n: 
+            item.gross_profit = v
+        elif t == 'OperatingIncome' or '營業利益' in n: 
+            item.operating_income = v
+        elif t in ['PreTaxIncome', 'IncomeBeforeTax'] or '稅前淨利' in n: 
+            item.pre_tax_income = v
+        elif t == 'IncomeAfterTaxes' or '本期淨利' in n or '本期淨利（淨損）' in n: 
+            item.net_income = v
+        elif t == 'EPS' or '每股盈餘' in n: 
+            item.eps = v
         
     return item
 
@@ -288,9 +296,9 @@ async def calculate_health_check(db: Session, stock_id: str):
     def fmt_x(val): return f"{val:.1f}x" if val is not None else "N/A"
     
     # --- Profitability ---
-    gross_margin = (latest_is.gross_profit / latest_is.revenue * 100) if latest_is.revenue and latest_is.revenue > 0 else 0
-    net_margin = (latest_is.net_income / latest_is.revenue * 100) if latest_is.revenue and latest_is.revenue > 0 else 0
-    roe = (latest_is.net_income * 4 / latest_bs.shareholders_equity * 100) if latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0 else 0
+    gross_margin = (latest_is.gross_profit / latest_is.revenue * 100) if latest_is.gross_profit is not None and latest_is.revenue and latest_is.revenue > 0 else 0
+    net_margin = (latest_is.net_income / latest_is.revenue * 100) if latest_is.net_income is not None and latest_is.revenue and latest_is.revenue > 0 else 0
+    roe = (latest_is.net_income * 4 / latest_bs.shareholders_equity * 100) if latest_is.net_income is not None and latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0 else 0
     
     profit_items = [
         {"label": "毛利率", "value": fmt_pct(gross_margin), "target": ">30%", "status": "pass" if gross_margin > 30 else "neutral" if gross_margin > 15 else "fail"},
@@ -300,9 +308,9 @@ async def calculate_health_check(db: Session, stock_id: str):
     profit_score = sum([100 if i["status"] == "pass" else 60 if i["status"] == "neutral" else 20 for i in profit_items]) // 3
 
     # --- Solvency ---
-    curr_ratio = (latest_bs.current_assets / latest_bs.current_liabilities) if latest_bs.current_liabilities and latest_bs.current_liabilities > 0 else 1
-    debt_eq_ratio = (latest_bs.total_liabilities / latest_bs.shareholders_equity) if latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0 else 1
-    quick_assets = (latest_bs.current_assets - (latest_bs.inventories or 0)) if latest_bs.current_assets else 0
+    curr_ratio = (latest_bs.current_assets / latest_bs.current_liabilities) if latest_bs.current_assets is not None and latest_bs.current_liabilities and latest_bs.current_liabilities > 0 else 1
+    debt_eq_ratio = (latest_bs.total_liabilities / latest_bs.shareholders_equity) if latest_bs.total_liabilities is not None and latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0 else 1
+    quick_assets = (latest_bs.current_assets - (latest_bs.inventories or 0)) if latest_bs.current_assets is not None else 0
     quick_ratio = (quick_assets / latest_bs.current_liabilities) if latest_bs.current_liabilities and latest_bs.current_liabilities > 0 else 1
 
     solv_items = [
@@ -315,7 +323,7 @@ async def calculate_health_check(db: Session, stock_id: str):
     # --- Growth ---
     rev_yoy = ((latest_is.revenue - prev_is.revenue) / prev_is.revenue * 100) if prev_is and prev_is.revenue and prev_is.revenue > 0 and latest_is.revenue is not None else 0
     eps_yoy = ((latest_is.eps - prev_is.eps) / prev_is.eps * 100) if prev_is and prev_is.eps and prev_is.eps > 0 and latest_is.eps is not None else 0
-    fcf = (latest_cf.free_cash_flow / 100000000) if latest_cf.free_cash_flow else 0 # 億元
+    fcf = (latest_cf.free_cash_flow / 100000000) if latest_cf.free_cash_flow is not None else 0 # 億元
     
     growth_items = [
         {"label": "營收年增率", "value": fmt_pct(rev_yoy), "target": ">0%", "status": "pass" if rev_yoy > 0 else "neutral" if rev_yoy > -5 else "fail"},
