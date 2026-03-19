@@ -3,7 +3,12 @@ import os
 import asyncio
 from dotenv import load_dotenv
 
-load_dotenv(dotenv_path=".env")
+# Load env vars from .env.local if present, or .env
+# Search in root directory (two levels up from this file)
+env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env.local")
+if not os.path.exists(env_path):
+    env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+load_dotenv(dotenv_path=env_path)
 
 FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wNCAwMDo0NjozNiIsInVzZXJfaWQiOiJyd2VpOTIwODIxIiwiZW1haWwiOiJyd2VpOTIwODIxQGdtYWlsLmNvbSIsImlwIjoiMzYuMjMyLjEzMS4xNDUifQ.lma1rhQCzfbLYPr0RFrvnQDvwUyocmpw9swbxFh6IbU")
