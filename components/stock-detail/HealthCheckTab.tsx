@@ -5,6 +5,11 @@ import { useCompanyProfile } from '../../hooks/useCompanyProfile';
 import { MetricCard } from './MetricCard';
 import { AIAnalysisCard } from '../AIAnalysisCard';
 
+import { HealthScoreGauge } from './HealthScoreGauge';
+import { AnalysisBox } from './AnalysisBox';
+import { MoatCard } from './MoatCard';
+import { DetailedMetricCard } from './DetailedMetricCard';
+
 export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
   const { data: healthCheckData, isLoading: isHealthCheckLoading } = useHealthCheck(stockId);
   const { data: profile } = useCompanyProfile(stockId);
@@ -30,88 +35,92 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Overall Score */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        <div className="md:col-span-4 lg:col-span-3 rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-            <Icon name="health_metrics" className="text-9xl" />
-          </div>
-          <h3 className="text-textMuted font-medium mb-4">綜合健康評分</h3>
-          <div className="flex flex-col items-center justify-center py-4">
-            <div className="relative size-32 flex items-center justify-center rounded-full border-[8px] border-emerald-500 bg-transparent mb-4 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-              <div className="text-center">
-                <span className="text-4xl font-black text-white">{healthCheckData.totalScore}</span>
-                <span className="block text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                  {healthCheckData.totalScore >= 80 ? '優秀' : healthCheckData.totalScore >= 60 ? '良好' : '待加強'}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-textMuted">同業平均</span>
-              <span className="font-bold text-white">64</span>
-            </div>
-            <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
-              <div className="h-full bg-slate-400 w-[64%]"></div>
-            </div>
-          </div>
+      {/* 第一排：總分與優劣勢 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-4">
+          <HealthScoreGauge score={healthCheckData.totalScore} peerAvg={64} />
         </div>
+        <div className="lg:col-span-8">
+          {healthCheckData.advanced?.prosCons ? (
+            <AnalysisBox data={healthCheckData.advanced.prosCons} />
+          ) : (
+            <div className="rounded-xl h-full bg-surface p-6 shadow-sm border border-surfaceLight text-textMuted flex items-center justify-center">資料載入中...</div>
+          )}
+        </div>
+      </div>
 
-        <div className="md:col-span-8 lg:col-span-9 rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-white">績效概覽</h3>
+      {/* 第二排：護城河與同業對比 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-4">
+          {healthCheckData.advanced?.moat && (
+             <MoatCard items={healthCheckData.advanced.moat} score={healthCheckData.advanced.moatScore || 0} />
+          )}
+        </div>
+        <div className="lg:col-span-8 rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight flex flex-col relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+            <Icon name="compare_arrows" className="text-9xl text-slate-400" />
+          </div>
+          <div className="flex justify-between items-center mb-8 z-10">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Icon name="bar_chart" className="text-blue-400" />
+              各項指標同業對比
+            </h3>
             <div className="flex gap-4">
-              <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-2 rounded-full bg-primary"></div>當前公司</div>
-              <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-2 rounded-full bg-slate-500"></div>同業平均</div>
+              <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-3 rounded-full bg-blue-500"></div>當前公司</div>
+              <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-3 rounded-full bg-slate-600"></div>同業平均</div>
             </div>
           </div>
-          {/* Mock Bars */}
-          <div className="grid grid-cols-4 gap-4 h-48 items-end pb-4 border-b border-surfaceLight">
+          
+          <div className="flex-1 grid grid-cols-4 gap-6 items-end pb-6 border-b border-surfaceLight/50 relative z-10">
+            <div className="absolute inset-x-0 bottom-8 border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
+            <div className="absolute inset-x-0 bottom-[calc(50%+1rem)] border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
+            <div className="absolute inset-x-0 top-0 border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
+            
             {[
-              { label: '獲利能力', val: healthCheckData.profitability.score, avg: 65, color: 'bg-primary' },
+              { label: '獲利能力', val: healthCheckData.profitability.score, avg: 65, color: 'bg-blue-500' },
               { label: '償債能力', val: healthCheckData.solvency.score, avg: 70, color: 'bg-emerald-500' },
               { label: '成長動能', val: healthCheckData.growth.score, avg: 50, color: 'bg-amber-500' },
               { label: '評價水位', val: healthCheckData.valuation.score, avg: 60, color: 'bg-rose-500' },
             ].map((d, i) => (
-              <div key={i} className="flex flex-col justify-end gap-2 h-full text-center group relative">
-                {/* Tooltip Popup */}
-                <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-surfaceLight border border-white/20 p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap min-w-[80px]">
+              <div key={i} className="flex flex-col justify-end gap-3 h-40 text-center group/bar relative">
+                <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-surfaceLight border border-white/10 p-2 rounded shadow-xl opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap min-w-[90px]">
                   <div className="text-[10px] text-textMuted font-bold uppercase mb-1">{d.label}</div>
                   <div className="flex flex-col gap-0.5">
                     <div className="flex justify-between items-center gap-4">
-                      <span className="text-[10px] text-white/70">當前分數</span>
+                      <span className="text-[10px] text-white/70">當前分</span>
                       <span className="text-sm font-black text-white">{d.val}</span>
                     </div>
                     <div className="flex justify-between items-center gap-4">
-                      <span className="text-[10px] text-white/50">同業平均</span>
+                      <span className="text-[10px] text-white/50">同業約</span>
                       <span className="text-xs font-bold text-textMuted">{d.avg}</span>
                     </div>
                   </div>
-                  {/* Arrow */}
-                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-surfaceLight border-r border-b border-white/20 rotate-45"></div>
                 </div>
 
-                <div className="flex items-end justify-center gap-2 h-full px-1">
-                  <div className="w-full bg-slate-700 rounded-t-sm relative group-hover:bg-slate-600 transition-colors" style={{ height: `${d.avg}%` }}></div>
-                  <div className={`w-full ${d.color} rounded-t-sm relative shadow-lg`} style={{ height: `${d.val}%` }}></div>
+                <div className="flex items-end justify-center gap-1.5 h-full px-2 w-full mx-auto max-w-[80px]">
+                  <div className="w-full bg-slate-600 rounded-t shadow-inner hover:bg-slate-500 transition-colors relative" style={{ height: `${d.avg}%` }}></div>
+                   <div className={`w-full ${d.color} rounded-t shadow-lg hover:brightness-110 transition-all relative`} style={{ height: `${d.val}%` }}></div>
                 </div>
                 <span className="text-xs font-bold text-slate-300">{d.label}</span>
               </div>
             ))}
           </div>
-          <p className="mt-4 text-sm text-textMuted">
-            <span className="font-bold text-primary">綜合分析：</span> 個股目前在各項指標表現如上，詳細指標請參考下方資料。
+          <p className="mt-4 text-sm text-textMuted z-10">
+            <span className="font-bold text-blue-400">價值導向洞察：</span> 儘管短期營收增長承受壓力，但高利潤率與強勁現金流支撐了長期估值基期。
           </p>
         </div>
       </div>
 
-      {/* Detailed Cards */}
+      {/* 第三排：進階檢點卡片 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <MetricCard category="profitability" items={healthCheckData.profitability.items} score={healthCheckData.profitability.score} />
+        <DetailedMetricCard type="profitability" categoryData={healthCheckData.profitability} advancedData={healthCheckData.advanced} />
+        <DetailedMetricCard type="valuation" categoryData={healthCheckData.valuation} advancedData={healthCheckData.advanced} />
+      </div>
+
+      {/* 第四排：基礎檢點卡片 (含 Sparkline) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <MetricCard category="solvency" items={healthCheckData.solvency.items} score={healthCheckData.solvency.score} />
         <MetricCard category="growth" items={healthCheckData.growth.items} score={healthCheckData.growth.score} />
-        <MetricCard category="valuation" items={healthCheckData.valuation.items} score={healthCheckData.valuation.score} />
       </div>
 
       {/* AI Analysis */}

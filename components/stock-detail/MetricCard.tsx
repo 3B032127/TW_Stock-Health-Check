@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '../../App';
+import { SparklineChart } from './SparklineChart';
 
 export const MetricCard = ({ category, items, score = 0 }: { category: string; items: any[], score?: number }) => {
   const getIcon = (cat: string) => {
@@ -44,7 +45,7 @@ export const MetricCard = ({ category, items, score = 0 }: { category: string; i
 
   return (
     <div className="rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight flex flex-col h-full">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <div className={`p-2 rounded-lg ${getBgColor(category)}`}>
             <Icon name={getIcon(category)} />
@@ -56,14 +57,22 @@ export const MetricCard = ({ category, items, score = 0 }: { category: string; i
         </span>
       </div>
 
-      <div className="space-y-5 flex-1">
+      <div className="space-y-3 flex-1">
         {items.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between p-4 rounded-xl bg-surfaceLight/10 hover:bg-surfaceLight/30 transition-all duration-300">
+          <div key={idx} className="flex items-center justify-between py-3 px-4 rounded-xl bg-surfaceLight/10 hover:bg-surfaceLight/30 transition-all duration-300">
             <div className="flex flex-col gap-1">
               <span className="text-xs font-bold text-textMuted uppercase tracking-wider">{item.label}</span>
               <span className="text-xl font-black text-white">{item.value}</span>
             </div>
             <div className="flex items-center gap-4">
+              {item.sparkline && (
+                <div className="hidden sm:block">
+                  <SparklineChart 
+                    data={item.sparkline.map((v: number, i: number) => ({ time: i.toString(), value: v }))}
+                    color={item.status === 'pass' ? '#10b981' : item.status === 'fail' ? '#f43f5e' : '#f59e0b'}
+                  />
+                </div>
+              )}
               <span className="text-xs text-textMuted hidden sm:block font-medium">目標: {item.target}</span>
               {item.status === 'pass' && (
                 <span className="px-3 py-1 rounded-lg text-sm font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 shadow-sm shadow-emerald-500/10">通過</span>

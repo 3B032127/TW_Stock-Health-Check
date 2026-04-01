@@ -23,11 +23,38 @@ export interface FinancialMetric {
   value: string;
   target: string;
   status: 'pass' | 'fail' | 'neutral';
+  sparkline?: number[];
 }
 
 export interface HealthCheckCategory {
   score: number;
   items: FinancialMetric[];
+}
+
+export interface ProsCons {
+  pros: string[];
+  cons: string[];
+}
+
+export interface MoatItem {
+  label: string;
+  status: 'pass' | 'fail';
+}
+
+export interface DupontData {
+  roe: number;
+  netMargin: number;
+  assetTurnover: number;
+  equityMultiplier: number;
+}
+
+export interface AdvancedHealthData {
+  prosCons: ProsCons;
+  moat: MoatItem[];
+  moatScore: number;
+  dupont: DupontData;
+  pePercentile: number;
+  peBand: { min: number, max: number, current: number };
 }
 
 export interface HealthCheckData {
@@ -36,6 +63,7 @@ export interface HealthCheckData {
   solvency: HealthCheckCategory;
   growth: HealthCheckCategory;
   valuation: HealthCheckCategory;
+  advanced?: AdvancedHealthData;
 }
 
 // --- New Interfaces for Profile Data Blocks ---
