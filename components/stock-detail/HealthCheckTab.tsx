@@ -5,6 +5,7 @@ import { useCompanyProfile } from '../../hooks/useCompanyProfile';
 import { MetricCard } from './MetricCard';
 import { AIAnalysisCard } from '../AIAnalysisCard';
 
+import { DiagnosticHeader } from './DiagnosticHeader';
 import { HealthScoreGauge } from './HealthScoreGauge';
 import { AnalysisBox } from './AnalysisBox';
 import { MoatCard } from './MoatCard';
@@ -35,32 +36,19 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* 第一排：總分與優劣勢 */}
+      {/* 診斷標頭 */}
+      <DiagnosticHeader 
+        decisionQuadrant={healthCheckData.advanced?.decisionQuadrant} 
+        aiSummary={healthCheckData.advanced?.prosCons?.aiSummary} 
+      />
+      
+      {/* 第一排：同業對比與總分 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4">
-          <HealthScoreGauge score={healthCheckData.totalScore} peerAvg={64} />
-        </div>
-        <div className="lg:col-span-8">
-          {healthCheckData.advanced?.prosCons ? (
-            <AnalysisBox data={healthCheckData.advanced.prosCons} />
-          ) : (
-            <div className="rounded-xl h-full bg-surface p-6 shadow-sm border border-surfaceLight text-textMuted flex items-center justify-center">資料載入中...</div>
-          )}
-        </div>
-      </div>
-
-      {/* 第二排：護城河與同業對比 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4">
-          {healthCheckData.advanced?.moat && (
-             <MoatCard items={healthCheckData.advanced.moat} score={healthCheckData.advanced.moatScore || 0} />
-          )}
-        </div>
         <div className="lg:col-span-8 rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight flex flex-col relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
             <Icon name="compare_arrows" className="text-9xl text-slate-400" />
           </div>
-          <div className="flex justify-between items-center mb-8 z-10">
+          <div className="flex justify-between items-center mb-4 z-10">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <Icon name="bar_chart" className="text-blue-400" />
               各項指標同業對比
@@ -77,10 +65,10 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
             <div className="absolute inset-x-0 top-0 border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
             
             {[
-              { label: '獲利能力', val: healthCheckData.profitability.score, avg: 65, color: 'bg-blue-500' },
-              { label: '償債能力', val: healthCheckData.solvency.score, avg: 70, color: 'bg-emerald-500' },
-              { label: '成長動能', val: healthCheckData.growth.score, avg: 50, color: 'bg-amber-500' },
-              { label: '評價水位', val: healthCheckData.valuation.score, avg: 60, color: 'bg-rose-500' },
+              { label: '獲利能力', val: healthCheckData.profitability.score, avg: healthCheckData.advanced?.peerAvgs?.profitability || 65, color: 'bg-blue-500' },
+              { label: '償債能力', val: healthCheckData.solvency.score, avg: healthCheckData.advanced?.peerAvgs?.solvency || 70, color: 'bg-emerald-500' },
+              { label: '成長動能', val: healthCheckData.growth.score, avg: healthCheckData.advanced?.peerAvgs?.growth || 50, color: 'bg-amber-500' },
+              { label: '評價水位', val: healthCheckData.valuation.score, avg: healthCheckData.advanced?.peerAvgs?.valuation || 60, color: 'bg-rose-500' },
             ].map((d, i) => (
               <div key={i} className="flex flex-col justify-end gap-3 h-40 text-center group/bar relative">
                 <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-surfaceLight border border-white/10 p-2 rounded shadow-xl opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap min-w-[90px]">
@@ -106,8 +94,27 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
             ))}
           </div>
           <p className="mt-4 text-sm text-textMuted z-10">
-            <span className="font-bold text-blue-400">價值導向洞察：</span> 儘管短期營收增長承受壓力，但高利潤率與強勁現金流支撐了長期估值基期。
+            <span className="font-bold text-blue-400">價值導向洞察：</span> 綜合財務體質評估，反映企業在產業競爭中的相對優勢水位。
           </p>
+        </div>
+        <div className="lg:col-span-4">
+          <HealthScoreGauge score={healthCheckData.totalScore} peerAvg={healthCheckData.advanced?.peerAvgs?.total || 64} />
+        </div>
+      </div>
+
+      {/* 第二排：護城河與優劣勢 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-8">
+          {healthCheckData.advanced?.moat && (
+             <MoatCard items={healthCheckData.advanced.moat} score={healthCheckData.advanced.moatScore || 0} dividendHistory={healthCheckData.advanced.dividendHistory} />
+          )}
+        </div>
+        <div className="lg:col-span-4">
+          {healthCheckData.advanced?.prosCons ? (
+            <AnalysisBox data={healthCheckData.advanced.prosCons} />
+          ) : (
+            <div className="rounded-xl h-full bg-surface p-6 shadow-sm border border-surfaceLight text-textMuted flex items-center justify-center">資料載入中...</div>
+          )}
         </div>
       </div>
 

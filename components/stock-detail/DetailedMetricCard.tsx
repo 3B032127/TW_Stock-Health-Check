@@ -68,7 +68,7 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
             <div className="mt-auto pt-4 flex flex-col gap-2">
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-textMuted">現金轉向率 (Cash Quality)</span>
-                <span className="text-emerald-400">115%</span>
+                <span className="text-emerald-400">{advancedData.cashConversion ?? 'N/A'}%</span>
               </div>
               <p className="text-[10px] text-textMuted">
                 營業淨現金流 / 税後淨利。比率 &gt; 100% 代表淨利轉換為現金效率極高，確保獲利品質實打實。
@@ -80,15 +80,26 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
             {/* Valuation Slider */}
             <div className="bg-surfaceLight/10 rounded-xl p-5 border border-surfaceLight">
               <div className="flex justify-between items-end mb-4">
-                <span className="text-xs font-bold text-textMuted">過去 5 年本益比區間 ({advancedData.peBand.min}x - {advancedData.peBand.max}x)</span>
-                <span className="text-sm font-black text-white">當前 P/E:{advancedData.peBand.current}x</span>
+                <span className="text-xs font-bold text-textMuted">過去五年本益比區間 (河流圖)</span>
+                <span className="text-sm font-black text-white">當前 P/E: {advancedData.peBand.current}x</span>
               </div>
               
               <div className="relative w-full h-8 flex rounded-md overflow-hidden bg-slate-800">
-                <div className="flex-1 bg-emerald-900 border-r border-slate-900"></div>
-                <div className="flex-1 bg-yellow-900 border-r border-slate-900"></div>
-                <div className="flex-1 bg-amber-900 border-r border-slate-900"></div>
-                <div className="flex-1 bg-rose-950"></div>
+                <div className="flex-1 bg-emerald-900 border-r border-slate-900 group relative">
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">極度低估 ({advancedData.peBand.p0}x)</span>
+                </div>
+                <div className="flex-1 bg-emerald-700 border-r border-slate-900 group relative">
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">低估 ({advancedData.peBand.p25}x)</span>
+                </div>
+                <div className="flex-1 bg-yellow-700 border-r border-slate-900 group relative">
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">合理 ({advancedData.peBand.p50}x)</span>
+                </div>
+                <div className="flex-1 bg-rose-700 border-r border-slate-900 group relative">
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">高估 ({advancedData.peBand.p75}x)</span>
+                </div>
+                <div className="flex-1 bg-rose-950 group relative">
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">極度高估 ({advancedData.peBand.p100}x)</span>
+                </div>
                 
                 {/* Pointer */}
                 <div 
@@ -99,31 +110,34 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
                 </div>
               </div>
               
-              <div className="mt-4 flex items-center gap-2 text-xs">
-                <Icon name="check_circle" className="text-[14px] text-emerald-400" />
-                <span className="text-textMuted">當前 P/E 落於過去 5 年 <span className="text-emerald-400 font-bold">{advancedData.pePercentile}% 分位數</span> (估值偏低)。</span>
+              <div className="flex justify-between mt-2 text-[10px] text-textMuted">
+                <span>落於第 {advancedData.pePercentile} 百分位</span>
+                <span>{advancedData.pePercentile > 80 ? '估值明顯承壓' : advancedData.pePercentile < 30 ? '深具安全邊際' : '估值中性合理'}</span>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 mt-4">
-               {categoryData.items.slice(1).map((item, idx) => (
-                 <div key={idx} className="flex justify-between items-center py-2 border-b border-surfaceLight/50 last:border-0">
-                   <span className="text-sm text-textMuted font-bold">{item.label}</span>
-                   <div className="flex items-center gap-2">
-                     <span className="font-black text-white">{item.value}</span>
-                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.status === 'pass' ? 'bg-emerald-500/20 text-emerald-400' : item.status === 'fail' ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                       {item.status === 'pass' ? '安全區間' : item.status === 'fail' ? '歷史高位' : '持平'}
-                     </span>
-                   </div>
-                 </div>
-               ))}
+            {/* MOS and PEG Box */}
+            <div className="grid grid-cols-2 gap-4 mt-2">
+              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
+                <span className="text-xs text-textMuted font-bold">推算合理價 (Margin of Safety)</span>
+                <span className="text-xl font-black text-white">{advancedData.mos?.fairPrice ? `$${advancedData.mos.fairPrice}` : 'N/A'}</span>
+                {advancedData.mos && advancedData.mos.discount > 0 && <span className="text-xs text-emerald-400 font-bold">目前折價 {advancedData.mos.discount}%</span>}
+                {advancedData.mos && advancedData.mos.discount <= 0 && <span className="text-xs text-rose-400 font-bold">目前溢價 {Math.abs(advancedData.mos.discount)}%</span>}
+              </div>
+              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
+                <span className="text-xs text-textMuted font-bold">成長估值比 (PEG)</span>
+                <span className="text-xl font-black text-white">{advancedData.peg || 'N/A'}</span>
+                <span className={`text-[10px] mt-1 ${advancedData.peg && advancedData.peg < 1 ? 'text-emerald-400' : 'text-textMuted'}`}>
+                  {advancedData.peg && advancedData.peg < 1 ? '< 1 代表具備成長溢價潛力' : '合理範圍'}
+                </span>
+              </div>
             </div>
 
             <div className="mt-auto pt-4">
                <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-3 flex items-start gap-2">
-                 <Icon name="gpp_bad" className="text-rose-400 text-[16px] mt-0.5" />
+                 <Icon name="info" className="text-rose-400 text-[16px] mt-0.5" />
                  <p className="text-xs text-rose-300">
-                   <span className="font-bold">安全邊際建議：</span> 分批佈局，留意短期外資動向。
+                   <span className="font-bold">估值指引：</span> 建議配合 PEG 與 MOS 折價幅度，分批逢低佈局。
                  </p>
                </div>
             </div>

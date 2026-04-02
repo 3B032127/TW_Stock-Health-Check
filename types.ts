@@ -49,12 +49,25 @@ export interface DupontData {
 }
 
 export interface AdvancedHealthData {
-  prosCons: ProsCons;
+  prosCons: ProsCons & { aiSummary?: string };
   moat: MoatItem[];
   moatScore: number;
   dupont: DupontData;
+  cashConversion?: number;
   pePercentile: number;
-  peBand: { min: number, max: number, current: number };
+  peBand: { p0: number, p25: number, p50: number, p75: number, p100: number, current: number };
+  mos?: { fairPrice: number; cheapPrice: number, discount: number };
+  peg?: number;
+  fcfTrend?: { quarter: string; value: number }[];
+  dividendHistory?: { year: number; amount: number; payoutRatio: number }[];
+  decisionQuadrant?: 'Quality Undervalued' | 'Growth Premium' | 'Value Trap' | 'Fairly Valued';
+  peerAvgs?: {
+    total: number;
+    profitability: number;
+    solvency: number;
+    growth: number;
+    valuation: number;
+  };
 }
 
 export interface HealthCheckData {

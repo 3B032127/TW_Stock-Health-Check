@@ -659,7 +659,45 @@ async def read_stock_health_check(
     source, hc_data = await finance.calculate_health_check(db, stock_id)
     if not hc_data:
         raise HTTPException(status_code=404, detail="Health check data not available")
-        
+
+    try:
+        peers_res = await read_stock_peers(stock_id)
+        if peers_res and peers_res.get("status") == "success":
+            peers = peers_res["data"].get("peers", [])
+            
+            # Use peers data to calculate real average scores
+            avg_pe = sum([p['peRatio'] for p in peers if p.get('peRatio')]) / max(1, len([p for p in peers if p.get('peRatio')]))
+            
+            peer_valuation = 60
+            if avg_pe and avg_pe < 15: peer_valuation += 15
+            elif avg_pe and avg_pe > 25: peer_valuation -= 15
+            
+            peer_profitability = 60
+            if any(p.get("grossMargin") for p in peers):
+                avg_gm = sum(p["grossMargin"] for p in peers if p.get("grossMargin")) / max(1, len([p for p in peers if p.get("grossMargin")]))
+                peer_profitability = 40 + int(avg_gm)
+            elif any(p.get("netMargin") for p in peers):
+                avg_nm = sum(p["netMargin"] for p in peers if p.get("netMargin")) / max(1, len([p for p in peers if p.get("netMargin")]))
+                peer_profitability = 40 + int(avg_nm)
+                
+            peer_growth = 55
+            if any(p.get("revenueYoY") for p in peers):
+                avg_rev = sum(p["revenueYoY"] for p in peers if p.get("revenueYoY")) / max(1, len([p for p in peers if p.get("revenueYoY")]))
+                peer_growth = 50 + int(avg_rev)
+                
+            peer_solvency = 65
+
+            hc_data.setdefault("advanced", {})
+            hc_data["advanced"]["peerAvgs"] = {
+                "total": int((peer_profitability + peer_solvency + peer_growth + peer_valuation) / 4),
+                "profitability": min(100, max(20, peer_profitability)),
+                "solvency": peer_solvency,
+                "growth": min(100, max(20, peer_growth)),
+                "valuation": min(100, max(20, peer_valuation))
+            }
+    except Exception as e:
+        print(f"Error calculating peerAvgs: {e}")
+
     return {
         "status": "success",
         "source": source,
