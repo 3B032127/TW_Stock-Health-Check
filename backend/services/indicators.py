@@ -411,43 +411,41 @@ class MarketIndicatorsService:
         
         Args:
             period: Time period - "1d", "1w", "1m", "1y"
-        
-        Returns:
-            Dict with current data and historical data
-            - 1d: Hourly data for current trading day
-            - 1w: Daily data for 5 trading days
-            - 1m: Weekly data (last day of each week)
-            - 1y: Monthly data (last day of each month)
         """
         try:
             ticker = yf.Ticker("^TWII")
             
-            # Always fetch last 2 days to get daily change (current vs yesterday)
-            daily_hist = ticker.history(period="2d")
+            # Fetch latest daily data for current price info
+            # Use period="5d" to ensure we get at least one valid trading day
+            daily_hist = ticker.history(period="5d")
             
             if daily_hist.empty:
-                return self._create_error_taiex_data("無法取得數據")
+                # Fallback to scraping if yfinance fails
+                yahoo_data = self._fetch_yahoo_taiex_data()
+                if yahoo_data.get('price'):
+                    return self._create_manual_taiex_response(yahoo_data, period)
+                return self._create_error_taiex_data("無法從 yfinance 或 Yahoo 取得數據")
             
-            # Get current (latest) data from daily history
+            # Get latest available trading day
             latest = daily_hist.iloc[-1]
             latest_date = daily_hist.index[-1]
             
-            # Calculate DAILY change (current vs yesterday's close)
             current_price = float(latest['Close'])
+            # Calculate change using previous close from history
             if len(daily_hist) > 1:
-                yesterday_close = float(daily_hist['Close'].iloc[-2])
+                prev_close = float(daily_hist['Close'].iloc[-2])
             else:
-                yesterday_close = float(latest['Open'])
+                prev_close = float(latest['Open'])
             
-            daily_change = current_price - yesterday_close
-            daily_change_percent = (daily_change / yesterday_close) * 100 if yesterday_close != 0 else 0
+            daily_change = current_price - prev_close
+            daily_change_percent = (daily_change / prev_close) * 100 if prev_close != 0 else 0
             
             # Get volume and turnover from Yahoo Finance Taiwan (scraping)
             yahoo_data = self._fetch_yahoo_taiex_data()
             volume = yahoo_data.get('volume', 0)
             turnover = yahoo_data.get('turnover', 0)
             
-            # If scraping failed, try yfinance volume (though usually 0 for ^TWII)
+            # If scraping failed, try yfinance volume
             if volume == 0 and 'Volume' in latest:
                 volume = float(latest['Volume'])
 
@@ -455,13 +453,18 @@ class MarketIndicatorsService:
             low = float(latest['Low'])
             open_price = float(latest['Open'])
             
-            # Fetch historical data based on period with appropriate interval
+            # Fetch historical data based on period
             history = []
             
             if period == "1d":
-                # 1 day: 5-minute intervals for smoother intraday chart
-                # This gives ~50-60 data points during trading hours
                 hist = ticker.history(period="1d", interval="5m")
+                if hist.empty:
+                    # If today is empty, show last trading day's 5m data
+                    hist = ticker.history(period="5d", interval="5m")
+                    if not hist.empty:
+                        last_day = hist.index[-1].date()
+                        hist = hist[hist.index.date == last_day]
+                
                 for idx, row in hist.iterrows():
                     history.append({
                         "date": idx.strftime("%Y-%m-%d %H:%M"),
@@ -470,8 +473,6 @@ class MarketIndicatorsService:
                     })
             
             elif period == "1w":
-                # 1 week: 30-minute intervals for detailed weekly view
-                # This gives ~40-50 data points across the week
                 hist = ticker.history(period="5d", interval="30m")
                 for idx, row in hist.iterrows():
                     history.append({
@@ -481,8 +482,6 @@ class MarketIndicatorsService:
                     })
             
             elif period == "1m":
-                # 1 month: Daily data for detailed monthly view
-                # This gives ~20-22 trading days
                 hist = ticker.history(period="1mo", interval="1d")
                 for idx, row in hist.iterrows():
                     history.append({
@@ -492,8 +491,6 @@ class MarketIndicatorsService:
                     })
             
             elif period == "1y":
-                # 1 year: Weekly data (every Friday or last trading day of week)
-                # This gives ~52 data points for the year
                 hist = ticker.history(period="1y", interval="1wk")
                 for idx, row in hist.iterrows():
                     history.append({
@@ -520,14 +517,18 @@ class MarketIndicatorsService:
             
         except Exception as e:
             print(f"Error fetching TAIEX data: {e}")
-            import traceback
-            traceback.print_exc()
+            try:
+                yahoo_data = self._fetch_yahoo_taiex_data()
+                if yahoo_data.get('price'):
+                    return self._create_manual_taiex_response(yahoo_data, period)
+            except:
+                pass
             return self._create_error_taiex_data(str(e))
 
     def _fetch_yahoo_taiex_data(self) -> Dict[str, float]:
         """
         Fetch TAIEX volume and turnover from Yahoo Finance Taiwan
-        Returns dict with 'volume' (shares) and 'turnover' (amount)
+        Returns dict with 'price', 'volume' (shares), and 'turnover' (amount)
         """
         try:
             url = "https://tw.stock.yahoo.com/s/tse.php"
@@ -557,48 +558,62 @@ class MarketIndicatorsService:
                             json_end = script.string.rfind("};")
                             if json_end != -1:
                                 json_str = script.string[json_start:json_end+1]
-                                
                                 # Sanitize common JS-only values
                                 json_str = json_str.replace("undefined", "null")
                                 
                                 try:
                                     data = json.loads(json_str)
+                                    dispatcher = data.get('context', {}).get('dispatcher', {}).get('stores', {})
                                     
-                                    quote_data = data.get('context', {}).get('dispatcher', {}).get('stores', {}).get('QuoteFundamental', {}).get('quote', {}).get('data', {})
+                                    # Try MarketDataStore first (modern path)
+                                    market_data = dispatcher.get('MarketDataStore', {}).get('marketDataList', {}).get('^TWII', {})
                                     
-                                    turnover_m = quote_data.get('turnoverM')
-                                    volume = quote_data.get('volume')
+                                    # Fallback to QuoteFundamental if MarketDataStore is missing
+                                    if not market_data:
+                                        market_data = dispatcher.get('QuoteFundamental', {}).get('quote', {}).get('data', {})
                                     
-                                    result = {}
-                                    
-                                    if volume:
-                                        result['volume'] = float(volume)
-                                        
-                                    if turnover_m:
-                                        # turnoverM is in millions? 
-                                        # Yahoo says "成交金額(億)", but raw data matches millions if 675796 = 6757.96 億 = 675,796,000,000 ??
-                                        # Let's check the verify script output:
-                                        # TurnoverM: 675796, Calc: 6757.96 億
-                                        # So turnoverM is essentially in Millions.
-                                        # We want to return raw amount (which is huge) or scaled amount?
-                                        # Frontend likely expects a number. Let's return raw amount (Millions * 1000000)
-                                        # logical, but display might need adjustment.
-                                        # Let's return the simplified "Million" unit or the "Billion" unit?
-                                        # Actually, yfinance volume is raw shares.
-                                        # Let's return raw amount for turnover too?
-                                        # 675796 * 1,000,000 = 675,796,000,000 (6757 Billion)
-                                        result['turnover'] = float(turnover_m) * 1000000
-                                    
+                                    if not market_data:
+                                        continue
+
+                                    result = {
+                                        "price": float(market_data.get('price', 0)),
+                                        "volume": float(market_data.get('volume', 0)),
+                                        "turnover": float(market_data.get('turnoverM', 0)) * 1000000,
+                                        "high": float(market_data.get('high', 0)),
+                                        "low": float(market_data.get('low', 0)),
+                                        "open": float(market_data.get('open', 0)),
+                                        "change": float(market_data.get('change', 0)),
+                                        "changePercent": float(market_data.get('changePercent', 0))
+                                    }
                                     return result
                                     
-                                except json.JSONDecodeError as je:
-                                    print(f"JSON Decode Error in Yahoo scraping: {je}")
+                                except (json.JSONDecodeError, ValueError) as e:
+                                    print(f"Error parsing Yahoo JSON: {e}")
             
             return {"volume": 0, "turnover": 0}
             
         except Exception as e:
             print(f"Error scraping Yahoo Finance: {e}")
             return {"volume": 0, "turnover": 0}
+
+    def _create_manual_taiex_response(self, yahoo_data: Dict[str, Any], period: str) -> Dict[str, Any]:
+        """Create a full response using only scraped Yahoo data when yfinance fails"""
+        return {
+            "current": {
+                "price": round(yahoo_data.get('price', 0), 2),
+                "change": round(yahoo_data.get('change', 0), 2),
+                "changePercent": round(yahoo_data.get('changePercent', 0), 2),
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "volume": yahoo_data.get('volume', 0),
+                "turnover": yahoo_data.get('turnover', 0),
+                "high": round(yahoo_data.get('high', 0), 2),
+                "low": round(yahoo_data.get('low', 0), 2),
+                "open": round(yahoo_data.get('open', 0), 2)
+            },
+            "history": [], # Scraper doesn't provide history easily
+            "period": period,
+            "source": "yahoo_scraper_fallback"
+        }
 
 
     
