@@ -50,17 +50,41 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
 
             <div className="grid grid-cols-2 gap-4 mt-2">
               <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
-                <span className="text-xs text-textMuted font-bold">毛利率</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-textMuted font-bold">毛利率</span>
+                  {advancedData?.peerAvgs?.rawGrossMargin && (
+                    <span className="text-[10px] text-amber-500 font-bold">同業平均: {advancedData?.peerAvgs?.rawGrossMargin}%</span>
+                  )}
+                </div>
                 <span className="text-xl font-black text-white">{categoryData.items[0]?.value || 'N/A'}</span>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: categoryData.items[0]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[0].value.replace('%', '')) || 0))}%` : '0%' }}></div>
+                <div className="relative w-full h-1.5 bg-slate-800 rounded-full">
+                  <div className="h-full bg-blue-500 rounded-full absolute left-0 top-0 bottom-0" style={{ width: categoryData.items[0]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[0].value.replace('%', '')) || 0))}%` : '0%' }}></div>
+                  {advancedData?.peerAvgs?.rawGrossMargin && (
+                    <div 
+                      className="absolute top-[-4px] bottom-[-4px] w-[3px] bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.8)] z-10 rounded-full" 
+                      style={{ left: `${Math.min(100, Math.max(0, advancedData?.peerAvgs?.rawGrossMargin))}%`, transform: 'translateX(-50%)' }} 
+                      title={`同業平均: ${advancedData?.peerAvgs?.rawGrossMargin}%`}
+                    ></div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
-                <span className="text-xs text-textMuted font-bold">淨利率</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-textMuted font-bold">淨利率</span>
+                  {advancedData?.peerAvgs?.rawNetMargin && (
+                    <span className="text-[10px] text-amber-500 font-bold">同業平均: {advancedData?.peerAvgs?.rawNetMargin}%</span>
+                  )}
+                </div>
                 <span className="text-xl font-black text-white">{categoryData.items[2]?.value || 'N/A'}</span>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: categoryData.items[2]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[2].value.replace('%', '')) || 0))}%` : '0%' }}></div>
+                <div className="relative w-full h-1.5 bg-slate-800 rounded-full">
+                  <div className="h-full bg-blue-500 rounded-full absolute left-0 top-0 bottom-0" style={{ width: categoryData.items[2]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[2].value.replace('%', '')) || 0))}%` : '0%' }}></div>
+                  {advancedData?.peerAvgs?.rawNetMargin && (
+                    <div 
+                      className="absolute top-[-4px] bottom-[-4px] w-[3px] bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.8)] z-10 rounded-full" 
+                      style={{ left: `${Math.min(100, Math.max(0, advancedData?.peerAvgs?.rawNetMargin))}%`, transform: 'translateX(-50%)' }} 
+                      title={`同業平均: ${advancedData?.peerAvgs?.rawNetMargin}%`}
+                    ></div>
+                  )}
                 </div>
               </div>
             </div>
@@ -75,76 +99,110 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
               </p>
             </div>
           </>
-        ) : !isProfit && advancedData?.peBand ? (
+        ) : !isProfit ? (
           <>
-            {/* Valuation Slider */}
-            <div className="bg-surfaceLight/10 rounded-xl p-5 border border-surfaceLight">
-              <div className="flex justify-between items-end mb-4">
-                <span className="text-xs font-bold text-textMuted">過去五年本益比區間 (河流圖)</span>
-                <span className="text-sm font-black text-white">當前 P/E: {advancedData.peBand.current}x</span>
-              </div>
-              
-              <div className="relative w-full h-8 flex rounded-md overflow-hidden bg-slate-800">
-                <div className="flex-1 bg-emerald-900 border-r border-slate-900 group relative">
-                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">極度低估 ({advancedData.peBand.p0}x)</span>
-                </div>
-                <div className="flex-1 bg-emerald-700 border-r border-slate-900 group relative">
-                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">低估 ({advancedData.peBand.p25}x)</span>
-                </div>
-                <div className="flex-1 bg-yellow-700 border-r border-slate-900 group relative">
-                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">合理 ({advancedData.peBand.p50}x)</span>
-                </div>
-                <div className="flex-1 bg-rose-700 border-r border-slate-900 group relative">
-                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">高估 ({advancedData.peBand.p75}x)</span>
-                </div>
-                <div className="flex-1 bg-rose-950 group relative">
-                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white/30 truncate">極度高估 ({advancedData.peBand.p100}x)</span>
+            {/* Valuation Slider (River Chart Style) */}
+            {advancedData?.peBand ? (
+              <div className="bg-surfaceLight/10 rounded-xl p-5 border border-surfaceLight shadow-inner">
+                <div className="flex justify-between items-end mb-5">
+                  <span className="text-xs font-bold text-textMuted uppercase tracking-wider">過去五年本益比區間 (河流圖)</span>
+                  <span className="text-sm font-black text-white px-2 py-0.5 bg-blue-500/20 rounded-md border border-blue-500/30">
+                    當前 P/E: <span className="text-blue-400">{advancedData.peBand.current}x</span>
+                  </span>
                 </div>
                 
-                {/* Pointer */}
-                <div 
-                  className="absolute top-0 bottom-0 w-[2px] bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,1)] z-10 transition-all duration-700"
-                  style={{ left: `${advancedData.pePercentile}%` }}
-                >
-                  <div className="absolute -top-1 -translate-x-1/2 w-3 h-3 rounded-full bg-blue-400 border-2 border-surface"></div>
+                <div className="relative w-full h-10 flex rounded-lg overflow-hidden border border-slate-900 shadow-lg">
+                  <div className="flex-1 bg-emerald-600 border-r border-black/20 group relative overflow-hidden">
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white font-bold drop-shadow-md truncate px-1">極低 ({advancedData.peBand.p0}x)</span>
+                  </div>
+                  <div className="flex-1 bg-emerald-400 border-r border-black/20 group relative overflow-hidden">
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white font-bold drop-shadow-md truncate px-1">低估 ({advancedData.peBand.p25}x)</span>
+                  </div>
+                  <div className="flex-1 bg-amber-400 border-r border-black/20 group relative overflow-hidden text-slate-900">
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold drop-shadow-sm truncate px-1">合理 ({advancedData.peBand.p50}x)</span>
+                  </div>
+                  <div className="flex-1 bg-rose-500 border-r border-black/20 group relative overflow-hidden">
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white font-bold drop-shadow-md truncate px-1">高估 ({advancedData.peBand.p75}x)</span>
+                  </div>
+                  <div className="flex-1 bg-rose-800 group relative overflow-hidden">
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white font-bold drop-shadow-md truncate px-1">極高 ({advancedData.peBand.p100}x)</span>
+                  </div>
+                  
+                  {/* Refined Pointer Indicator */}
+                  <div 
+                    className="absolute top-0 bottom-0 w-[3px] bg-white shadow-[0_0_15px_rgba(255,255,255,1)] z-20 transition-all duration-1000 ease-out"
+                    style={{ left: `${advancedData.pePercentile}%`, transform: 'translateX(-50%)' }}
+                  >
+                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-4 border-blue-500 shadow-xl ring-2 ring-white/20"></div>
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-4 border-blue-500 shadow-xl ring-2 ring-white/20"></div>
+                  </div>
+                </div>
+                
+                <div className="flex justify-between mt-3 px-1 text-[11px] font-bold">
+                  <div className="flex items-center gap-1.5 text-textMuted">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></div>
+                    目前落於第 <span className="text-white">{advancedData.pePercentile}</span> 百分位
+                  </div>
+                  <span className={`${advancedData.pePercentile > 80 ? 'text-rose-400' : advancedData.pePercentile < 30 ? 'text-emerald-400' : 'text-blue-400'}`}>
+                    {advancedData.pePercentile > 80 ? '估值明顯承壓' : advancedData.pePercentile < 30 ? '深具安全邊際' : '估值中性合理'}
+                  </span>
                 </div>
               </div>
-              
-              <div className="flex justify-between mt-2 text-[10px] text-textMuted">
-                <span>落於第 {advancedData.pePercentile} 百分位</span>
-                <span>{advancedData.pePercentile > 80 ? '估值明顯承壓' : advancedData.pePercentile < 30 ? '深具安全邊際' : '估值中性合理'}</span>
+            ) : (
+              <div className="bg-surfaceLight/10 rounded-xl p-5 border border-surfaceLight border-l-4 border-l-rose-500">
+                <span className="text-xs font-bold text-textMuted uppercase tracking-wider block mb-2">評價水位狀態</span>
+                <p className="text-sm text-white font-medium">數據計算中，請稍候...</p>
               </div>
+            )}
+
+            {/* Basic Evaluation Metrics (Restored for consistency) */}
+            <div className="grid grid-cols-3 gap-3 mt-4">
+               {categoryData.items.map((item, idx) => (
+                 <div key={idx} className="flex flex-col gap-1 border-b border-surfaceLight/50 pb-2">
+                   <span className="text-[10px] text-textMuted font-bold truncate">{item.label}</span>
+                   <span className={`text-sm font-black ${item.status === 'pass' ? 'text-emerald-400' : item.status === 'neutral' ? 'text-blue-400' : 'text-rose-400'}`}>{item.value}</span>
+                 </div>
+               ))}
             </div>
 
             {/* MOS and PEG Box */}
+            {advancedData?.mos && (
             <div className="grid grid-cols-2 gap-4 mt-2">
-              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
-                <span className="text-xs text-textMuted font-bold">推算合理價 (Margin of Safety)</span>
-                <span className="text-xl font-black text-white">{advancedData.mos?.fairPrice ? `$${advancedData.mos.fairPrice}` : 'N/A'}</span>
-                {advancedData.mos && advancedData.mos.discount > 0 && <span className="text-xs text-emerald-400 font-bold">目前折價 {advancedData.mos.discount}%</span>}
-                {advancedData.mos && advancedData.mos.discount <= 0 && <span className="text-xs text-rose-400 font-bold">目前溢價 {Math.abs(advancedData.mos.discount)}%</span>}
-              </div>
-              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
-                <span className="text-xs text-textMuted font-bold">成長估值比 (PEG)</span>
-                <span className="text-xl font-black text-white">{advancedData.peg || 'N/A'}</span>
-                <span className={`text-[10px] mt-1 ${advancedData.peg && advancedData.peg < 1 ? 'text-emerald-400' : 'text-textMuted'}`}>
-                  {advancedData.peg && advancedData.peg < 1 ? '< 1 代表具備成長溢價潛力' : '合理範圍'}
+              <div className="flex flex-col gap-1 border-r border-surfaceLight/50 pr-4">
+                <span className="text-[10px] text-textMuted font-bold">推算合理價 (MOS)</span>
+                <span className="text-lg font-black text-white">{advancedData.mos.fairPrice ? `$${advancedData.mos.fairPrice}` : 'N/A'}</span>
+                <span className={`text-[10px] font-bold ${advancedData.mos.discount > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {advancedData.mos.discount > 0 ? `折價 ${advancedData.mos.discount}%` : `溢價 ${Math.abs(advancedData.mos.discount)}%`}
                 </span>
               </div>
+              <div className="flex flex-col gap-1 pl-2">
+                <span className="text-[10px] text-textMuted font-bold">成長估值比 (PEG)</span>
+                <span className="text-lg font-black text-white">{advancedData.peg || 'N/A'}</span>
+                {advancedData.peg !== undefined && (
+                  <span className={`text-[9px] font-bold ${advancedData.peg < 1 ? 'text-emerald-400' : 'text-textMuted'}`}>
+                    {advancedData.peg < 1 ? '具成長潛力' : '合理範圍'}
+                  </span>
+                )}
+              </div>
             </div>
+            )}
 
-            <div className="mt-auto pt-4">
-               <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-3 flex items-start gap-2">
-                 <Icon name="info" className="text-rose-400 text-[16px] mt-0.5" />
-                 <p className="text-xs text-rose-300">
-                   <span className="font-bold">估值指引：</span> 建議配合 PEG 與 MOS 折價幅度，分批逢低佈局。
+            <div className="mt-auto pt-4 border-t border-surfaceLight/30">
+               <div className="bg-rose-500/5 border border-rose-500/10 rounded-lg p-2.5 flex items-start gap-2">
+                 <Icon name="info" className="text-rose-400 text-[14px] mt-0.5" />
+                 <p className="text-[11px] text-rose-300 leading-tight">
+                   配合 PEG 與 MOS 折價幅度進行評估。獲利穩定度越高，推算價格之參考價值越顯著。
                  </p>
                </div>
             </div>
           </>
         ) : (
-          <div className="text-textMuted text-sm">數據加載中...</div>
+          <div className="text-textMuted text-sm flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            數據拼裝中...
+          </div>
         )}
+
       </div>
     </div>
   );
