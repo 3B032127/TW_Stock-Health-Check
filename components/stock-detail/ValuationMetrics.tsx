@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { Icon } from '../../App';
 import { useValuationMetrics } from '../../hooks/useValuationMetrics';
+import { useHealthCheck } from '../../hooks/useHealthCheck';
 import { SparklineChart } from './SparklineChart';
 
 export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
   const { data, isLoading, error } = useValuationMetrics(stockId);
-  const [activeMetric, setActiveMetric] = useState<'price' | 'peRatio' | 'pbRatio' | 'dividendYield' | null>(null);
+  const { data: hcData } = useHealthCheck(stockId);
+  const forwardYield = hcData?.advanced?.forwardYield;
+  const [activeMetric, setActiveMetric] = useState<'price' | 'peRatio' | 'pbRatio' | 'dividendYield' | 'forwardYield' | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -119,6 +122,19 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
         currentValue = (!data.dividendYield || data.dividendYield <= 0) ? `無配息` : `${data.dividendYield.toFixed(2)} %`;
         tag = yieldTag;
         break;
+      case 'forwardYield':
+        title = "預估殖利率 (Forward Yield)";
+        explanation = (!forwardYield || forwardYield <= 0)
+          ? "無法計算預估殖利率（可能因公司近期虧損或未配息）。"
+          : "算法為「(近四季累積 EPS × 歷史平均配息率) ÷ 股價」。此指標能提早反映公司近期獲利對未來配息能力的潛在影響，比單純看落後指標(歷史殖利率)更具前瞻性。";
+        analysis = (!forwardYield || forwardYield <= 0)
+          ? "預估殖利率無法評估。建議關注公司營運是否轉盈或具有其他成長動能。"
+          : `考量近四季 EPS 與歷史發放率，預估未來一年殖利率約為 ${forwardYield.toFixed(1)}%。這有助於評估當前股價是否提供足夠的安全邊際。`;
+        color = "#10b981"; // emerald
+        chartData = []; // No sparkline for forward yield
+        currentValue = (!forwardYield || forwardYield <= 0) ? `無預估` : `${forwardYield.toFixed(2)} %`;
+        tag = (forwardYield && forwardYield > 4) ? { text: "具高殖利率潛力", textClass: "text-emerald-400", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/20" } : { text: "合理水準", textClass: "text-blue-400", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/20" };
+        break;
     }
 
     return { title, explanation, analysis, chartData, color, currentValue, tag };
@@ -128,8 +144,8 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-pulse">
-        {[1, 2, 3, 4].map(i => (
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 animate-pulse">
+        {[1, 2, 3, 4, 5].map(i => (
           <div key={i} className="bg-surface border border-surfaceLight rounded-xl p-5 h-[104px]">
             <div className="h-4 bg-surfaceLight w-16 mb-4 rounded"></div>
             <div className="h-6 bg-surfaceLight w-24 rounded"></div>
@@ -141,8 +157,8 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
 
   if (error || !data) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map(i => (
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {[1, 2, 3, 4, 5].map(i => (
           <div key={i} className="bg-surface border border-surfaceLight rounded-xl p-5 h-[104px] flex items-center justify-center">
             <span className="text-textMuted text-xs">暫無估值資料</span>
           </div>
@@ -153,7 +169,7 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
 
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <div
           onClick={() => setActiveMetric('price')}
           className="bg-surface border border-surfaceLight rounded-xl p-5 flex flex-col justify-between relative overflow-hidden group hover:border-primary hover:scale-[1.02] cursor-pointer transition-all duration-300"
@@ -228,6 +244,25 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
             <SparklineChart data={data.yieldSparkline || []} color="#f59e0b" />
           </div>
           <div className={`mt-2 text-xs px-2 py-1 rounded w-fit font-medium relative z-10 ${yieldTag.textClass} ${yieldTag.bgClass}`}>{yieldTag.text}</div>
+        </div>
+
+        <div
+          onClick={() => setActiveMetric('forwardYield')}
+          className="bg-surface border border-surfaceLight rounded-xl p-5 flex flex-col justify-between relative overflow-hidden group hover:border-emerald-500 hover:scale-[1.02] cursor-pointer transition-all duration-300"
+        >
+          <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-15 transition-opacity z-0 pointer-events-none"><Icon name="trending_up" className="text-4xl text-emerald-500" /></div>
+          <p className="text-sm text-textMuted mb-2 relative z-10">預估殖利率</p>
+          <div className="flex items-baseline gap-2 relative z-10">
+            {(!forwardYield || forwardYield <= 0) ? (
+              <span className="text-3xl font-bold text-slate-400">無預估</span>
+            ) : (
+              <>
+                <span className="text-3xl font-bold text-emerald-400">{forwardYield.toFixed(1)}</span>
+                <span className="text-xl font-bold text-emerald-400">%</span>
+              </>
+            )}
+          </div>
+          <div className={`mt-auto pt-4 text-xs px-2 py-1 rounded w-fit font-medium relative z-10 ${forwardYield && forwardYield > 4 ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-400 bg-slate-500/10'}`}>{forwardYield && forwardYield > 4 ? '優於定存' : '一般基準'}</div>
         </div>
       </div>
 

@@ -1,16 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 
-export interface OwnershipData {
-    directors: number;
-    foreign: number;
-    investmentTrust: number;
-    totalShares?: number;
-    foreignLimit?: number;
-    directorPledgeRatio?: number;
-    retailRatio?: number;
-    majorShareholdersCount?: number;
-}
+import { OwnershipData } from '../types';
 
 interface OwnershipResponse {
     status: string;

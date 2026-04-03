@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line, YAxis } from 'recharts';
 import { Icon } from '../../App';
 import { useOwnershipData } from '../../hooks/useOwnershipData';
 
@@ -54,8 +54,8 @@ export const OwnershipSummary = ({ stockId }: { stockId: string }) => {
   };
 
   return (
-    <div className="bg-surface border border-surfaceLight rounded-xl p-6 relative">
-      <h3 className="text-white text-lg font-bold mb-4 flex items-center gap-2">
+    <div className="bg-surface border border-surfaceLight rounded-xl p-[18px] relative">
+      <h3 className="text-white text-lg font-bold mb-3 flex items-center gap-2">
         <Icon name="groups" className="text-indigo-400" />
         股權與籌碼摘要
       </h3>
@@ -74,10 +74,10 @@ export const OwnershipSummary = ({ stockId }: { stockId: string }) => {
           <span className="text-textMuted text-sm">暫無股權資料</span>
         </div>
       ) : (
-        <div className="flex flex-col gap-6 mt-2">
+        <div className="flex flex-col gap-3.5">
           {/* Pie Chart Top Section */}
           <div
-            className="h-[250px] w-full relative"
+            className="h-[215px] w-full relative"
             onMouseMove={handleContainerMouseMove}
             onMouseLeave={handleContainerMouseLeave}
           >
@@ -87,8 +87,8 @@ export const OwnershipSummary = ({ stockId }: { stockId: string }) => {
                   data={pieData}
                   cx="50%"
                   cy="45%"
-                  innerRadius={65}
-                  outerRadius={90}
+                  innerRadius={55}
+                  outerRadius={80}
                   paddingAngle={4}
                   startAngle={90}
                   endAngle={-270}
@@ -160,11 +160,57 @@ export const OwnershipSummary = ({ stockId }: { stockId: string }) => {
             </div>
           </div>
 
+            {/* 30 Day Trend Section - Separated with sub-heading */}
+            {data.ownershipTrend && data.ownershipTrend.length > 0 && (
+              <div className="bg-surfaceLight/30 border border-surfaceLight/50 rounded-xl p-4 my-1">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="p-1 px-1.5 bg-blue-500/10 rounded border border-blue-500/20">
+                    <Icon name="trending_up" className="text-blue-400 text-sm" />
+                  </div>
+                  <span className="text-sm font-black text-white">近 30 日籌碼動態趨勢</span>
+                  <div className="ml-auto flex gap-3">
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-[#34d399]"></div>
+                      <span className="text-[10px] text-textMuted font-bold">外資</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-[#fb7185]"></div>
+                      <span className="text-[10px] text-textMuted font-bold">投信</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="h-20 w-full opacity-90">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data.ownershipTrend}>
+                      <YAxis yAxisId="foreign" hide domain={['auto', 'auto']} />
+                      <YAxis yAxisId="investmentTrust" hide domain={['auto', 'auto']} />
+                      <Line yAxisId="foreign" type="monotone" dataKey="foreign" stroke="#34d399" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                      <Line yAxisId="investmentTrust" type="monotone" dataKey="investmentTrust" stroke="#fb7185" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-2 text-center">
+                  <p className="text-[10px] text-textMuted italic">
+                    數據整合週頻率持股比例（外資）與日頻率累積買賣超（投信）
+                  </p>
+                </div>
+              </div>
+            )}
+
           {/* Separator */}
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-surfaceLight to-transparent my-1"></div>
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-surfaceLight to-transparent my-0.5"></div>
 
           {/* New Equity Metric Cards Bottom Section */}
-          <div className="grid grid-cols-2 gap-3 h-fit mt-1">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <div className="p-1 px-1.5 bg-amber-500/10 rounded border border-amber-500/20">
+                <Icon name="analytics" className="text-amber-400 text-sm" />
+              </div>
+              <span className="text-sm font-black text-white">關鍵股權指標</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3 h-fit">
             {/* 1. 發行總張數 (Total Shares) */}
             <div className="relative w-full h-[140px] group col-span-2">
               <div className="absolute inset-0 z-0 group-hover:z-50 p-4 bg-surfaceLight/20 border border-surfaceLight rounded-xl cursor-default transition-all duration-300 ease-out group-hover:-top-4 group-hover:-bottom-20 group-hover:-inset-x-4 group-hover:bg-surface group-hover:shadow-2xl group-hover:shadow-blue-500/10 group-hover:border-blue-500/40 flex flex-col items-center justify-center overflow-hidden">
@@ -288,6 +334,7 @@ export const OwnershipSummary = ({ stockId }: { stockId: string }) => {
                   </p>
                 </div>
               </div>
+            </div>
             </div>
           </div>
         </div>
