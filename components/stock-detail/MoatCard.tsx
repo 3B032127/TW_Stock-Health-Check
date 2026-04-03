@@ -14,6 +14,30 @@ export const MoatCard: React.FC<MoatCardProps> = ({ items, score, dividendHistor
   const radarData = advancedData?.moatRadar || [];
   const keywords = advancedData?.moatKeywords || [];
   const zScore = advancedData?.profitStabilityZScore;
+  const beta = advancedData?.beta;
+
+  const getVolatilityLabel = (b: number) => {
+    if (b < 0.8) return { 
+      text: '防禦型 (低波動)', 
+      desc: `較大盤波動率約 ${(b*100).toFixed(0)}%，屬於穩健標的`,
+      advice: '適合長線領息與風險規避型佈局',
+      color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: 'shield' 
+    };
+    if (b > 1.2) return { 
+      text: '攻擊型 (高波動)', 
+      desc: `較大盤波動率約 ${(b*100).toFixed(0)}%，屬於積極標的`,
+      advice: '適合追求價差的波段操作或景氣復甦期',
+      color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20', icon: 'bolt' 
+    };
+    return { 
+      text: '標竿型 (中波動)', 
+      desc: '波動率與大盤趨於一致',
+      advice: '適合追隨產業趨勢的標準化配置',
+      color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', icon: 'auto_graph' 
+    };
+  };
+
+  const vStyle = beta !== undefined ? getVolatilityLabel(beta) : null;
 
   // Enhance dividend history with payout ratio and ensure timeline order
   const chartData = dividendHistory ? [...dividendHistory].reverse().map(d => ({
@@ -40,6 +64,8 @@ export const MoatCard: React.FC<MoatCardProps> = ({ items, score, dividendHistor
                </span>
             </div>
           )}
+
+
 
           {/* Moat Keywords */}
           {keywords.length > 0 && (
