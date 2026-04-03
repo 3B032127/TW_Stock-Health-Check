@@ -5,9 +5,7 @@ import { useCompanyProfile } from '../../hooks/useCompanyProfile';
 import { MetricCard } from './MetricCard';
 import { AIAnalysisCard } from '../AIAnalysisCard';
 
-import { DiagnosticHeader } from './DiagnosticHeader';
 import { HealthScoreGauge } from './HealthScoreGauge';
-import { AnalysisBox } from './AnalysisBox';
 import { MoatCard } from './MoatCard';
 import { DetailedMetricCard } from './DetailedMetricCard';
 
@@ -35,85 +33,79 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      {/* 診斷標頭 */}
-      <DiagnosticHeader data={healthCheckData.advanced} />
-      
-      {/* 第一排：同業對比與總分 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8 rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight flex flex-col relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
-            <Icon name="compare_arrows" className="text-9xl text-slate-400" />
-          </div>
-          <div className="flex justify-between items-center mb-4 z-10">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Icon name="bar_chart" className="text-blue-400" />
-              各項指標同業對比
-            </h3>
-            <div className="flex gap-4">
-              <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-3 rounded-full bg-blue-500"></div>當前公司</div>
-              <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-3 rounded-full bg-slate-600"></div>同業平均</div>
-            </div>
-          </div>
+    <div className="flex flex-col gap-6">
+      {/* 頂部主儀表板：財務對比、護城河與綜合看板 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        
+        {/* 左側主區域 (8/12) */}
+        <div className="lg:col-span-8 flex flex-col gap-6 font-sans">
           
-          <div className="flex-1 grid grid-cols-4 gap-6 items-end pb-6 border-b border-surfaceLight/50 relative z-10">
-            <div className="absolute inset-x-0 bottom-8 border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
-            <div className="absolute inset-x-0 bottom-[calc(50%+1rem)] border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
-            <div className="absolute inset-x-0 top-0 border-t border-dashed border-surfaceLight/30 pointer-events-none"></div>
-            
-            {[
-              { label: '獲利能力', val: healthCheckData.profitability.score, avg: healthCheckData.advanced?.peerAvgs?.profitability || 65, color: 'bg-blue-500' },
-              { label: '償債能力', val: healthCheckData.solvency.score, avg: healthCheckData.advanced?.peerAvgs?.solvency || 70, color: 'bg-emerald-500' },
-              { label: '成長動能', val: healthCheckData.growth.score, avg: healthCheckData.advanced?.peerAvgs?.growth || 50, color: 'bg-amber-500' },
-              { label: '評價水位', val: healthCheckData.valuation.score, avg: healthCheckData.advanced?.peerAvgs?.valuation || 60, color: 'bg-rose-500' },
-            ].map((d, i) => (
-              <div key={i} className="flex flex-col justify-end gap-3 h-40 text-center group/bar relative">
-                <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-surfaceLight border border-white/10 p-2 rounded shadow-xl opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap min-w-[90px]">
-                  <div className="text-[10px] text-textMuted font-bold uppercase mb-1">{d.label}</div>
-                  <div className="flex flex-col gap-0.5">
-                    <div className="flex justify-between items-center gap-4">
-                      <span className="text-[10px] text-white/70">當前分</span>
-                      <span className="text-sm font-black text-white">{d.val}</span>
-                    </div>
-                    <div className="flex justify-between items-center gap-4">
-                      <span className="text-[10px] text-white/50">同業約</span>
-                      <span className="text-xs font-bold text-textMuted">{d.avg}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-end justify-center gap-1.5 h-full px-2 w-full mx-auto max-w-[80px]">
-                  <div className="w-full bg-slate-600 rounded-t shadow-inner hover:bg-slate-500 transition-colors relative" style={{ height: `${d.avg}%` }}></div>
-                   <div className={`w-full ${d.color} rounded-t shadow-lg hover:brightness-110 transition-all relative`} style={{ height: `${d.val}%` }}></div>
-                </div>
-                <span className="text-xs font-bold text-slate-300">{d.label}</span>
+          {/* 同業對比卡片 */}
+          <div className="rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight flex flex-col relative overflow-hidden group min-h-[300px]">
+            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
+              <Icon name="compare_arrows" className="text-9xl text-slate-400" />
+            </div>
+            <div className="flex justify-between items-center mb-6 z-10">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Icon name="bar_chart" className="text-blue-400" />
+                財務標竿同業對比
+              </h3>
+              <div className="flex gap-4">
+                <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-2 rounded-full bg-blue-500"></div>當前公司</div>
+                <div className="flex items-center gap-2 text-xs text-textMuted"><div className="size-2 rounded-full bg-slate-600"></div>同業平均</div>
               </div>
-            ))}
+            </div>
+            
+            <div className="flex-1 grid grid-cols-4 gap-6 items-end pb-6 border-b border-surfaceLight/50 relative z-10">
+              {[
+                { label: '獲利能力', val: healthCheckData.profitability.score, avg: healthCheckData.advanced?.peerAvgs?.profitability || 65, color: 'bg-blue-500' },
+                { label: '償債能力', val: healthCheckData.solvency.score, avg: healthCheckData.advanced?.peerAvgs?.solvency || 70, color: 'bg-emerald-500' },
+                { label: '成長動能', val: healthCheckData.growth.score, avg: healthCheckData.advanced?.peerAvgs?.growth || 50, color: 'bg-amber-500' },
+                { label: '評價水位', val: healthCheckData.valuation.score, avg: healthCheckData.advanced?.peerAvgs?.valuation || 60, color: 'bg-rose-500' },
+              ].map((d, i) => (
+                <div key={i} className="flex flex-col justify-end gap-3 h-40 text-center group/bar relative">
+                  <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-surfaceLight border border-white/10 p-2 rounded shadow-xl opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none z-50 whitespace-nowrap min-w-[90px]">
+                     <div className="text-[10px] text-white/50 font-bold mb-1">{d.label}</div>
+                     <div className="text-sm font-black text-white">{d.val} <span className="text-[10px] text-textMuted font-normal">/ Avg: {d.avg}</span></div>
+                  </div>
+
+                  <div className="flex items-end justify-center gap-1.5 h-full px-2 w-full mx-auto max-w-[80px]">
+                    <div className="w-full bg-slate-600/50 rounded-t shadow-inner hover:bg-slate-500 transition-colors relative" style={{ height: `${d.avg}%` }}></div>
+                     <div className={`w-full ${d.color} rounded-t shadow-lg hover:brightness-110 transition-all relative`} style={{ height: `${d.val}%` }}></div>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-400">{d.label}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-[10px] text-textMuted z-10 italic">
+              * 基於 FinMind 同業數據運算，反映企業在產業競爭中的相對財務優勢。
+            </p>
           </div>
-          <p className="mt-4 text-sm text-textMuted z-10">
-            <span className="font-bold text-blue-400">價值導向洞察：</span> 綜合財務體質評估，反映企業在產業競爭中的相對優勢水位。
-          </p>
+
+          {/* 護城河卡片 */}
+          {healthCheckData.advanced?.moat && (
+             <MoatCard 
+               advancedData={healthCheckData.advanced} 
+               items={healthCheckData.advanced.moat} 
+               score={healthCheckData.advanced.moatScore || 0} 
+               dividendHistory={healthCheckData.advanced.dividendHistory} 
+             />
+          )}
         </div>
-        <div className="lg:col-span-4">
-          <HealthScoreGauge score={healthCheckData.totalScore} peerAvg={healthCheckData.advanced?.peerAvgs?.total || 64} />
+
+        {/* 右側綜合導航大卡片 (4/12) - 垂直拉長整合 */}
+        <div className="lg:col-span-4 h-full">
+          <HealthScoreGauge 
+            score={healthCheckData.totalScore} 
+            peerAvg={healthCheckData.advanced?.peerAvgs?.total || 64} 
+            data={healthCheckData.advanced} 
+            prosCons={healthCheckData.advanced?.prosCons}
+            nextEvent={healthCheckData.advanced?.nextEvent}
+          />
         </div>
       </div>
 
-      {/* 第二排：護城河與優劣勢 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8">
-          {healthCheckData.advanced?.moat && (
-             <MoatCard advancedData={healthCheckData.advanced} items={healthCheckData.advanced.moat} score={healthCheckData.advanced.moatScore || 0} dividendHistory={healthCheckData.advanced.dividendHistory} />
-          )}
-        </div>
-        <div className="lg:col-span-4">
-          {healthCheckData.advanced?.prosCons ? (
-            <AnalysisBox data={healthCheckData.advanced.prosCons} />
-          ) : (
-            <div className="rounded-xl h-full bg-surface p-6 shadow-sm border border-surfaceLight text-textMuted flex items-center justify-center">資料載入中...</div>
-          )}
-        </div>
-      </div>
+
 
       {/* 第三排：進階檢點卡片 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
