@@ -128,25 +128,30 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
                       <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white font-bold drop-shadow-md truncate px-1">極高 ({advancedData.peBand.p100}x)</span>
                   </div>
                   
-                  {/* Refined Pointer Indicator */}
+                  {/* Refined Pointer Indicator: Vertical Glowing Axis */}
                   <div 
-                    className="absolute top-0 bottom-0 w-[3px] bg-white shadow-[0_0_15px_rgba(255,255,255,1)] z-20 transition-all duration-1000 ease-out"
-                    style={{ left: `${advancedData.pePercentile}%`, transform: 'translateX(-50%)' }}
+                    className="absolute top-[-4px] bottom-[-4px] w-[2px] bg-white z-20 transition-all duration-1000 ease-out"
+                    style={{ 
+                      left: `${advancedData.pePercentile}%`, 
+                      transform: 'translateX(-50%)',
+                      boxShadow: '0 0 15px 4px rgba(255, 255, 255, 0.4), 0 0 5px 1px rgba(59, 130, 246, 0.8)'
+                    }}
                   >
-                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-4 border-blue-500 shadow-xl ring-2 ring-white/20"></div>
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-4 border-blue-500 shadow-xl ring-2 ring-white/20"></div>
+                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white border-2 border-blue-500 shadow-[0_0_10px_rgba(255,255,255,0.8)]"></div>
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white border-2 border-blue-500 shadow-[0_0_10px_rgba(255,255,255,0.8)]"></div>
                   </div>
                 </div>
                 
                 <div className="flex justify-between mt-3 px-1 text-[11px] font-bold">
                   <div className="flex items-center gap-1.5 text-textMuted">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shadow-[0_0_5px_rgba(96,165,250,0.8)]"></div>
                     目前落於第 <span className="text-white">{advancedData.pePercentile}</span> 百分位
                   </div>
-                  <span className={`${advancedData.pePercentile > 80 ? 'text-rose-400' : advancedData.pePercentile < 30 ? 'text-emerald-400' : 'text-blue-400'}`}>
+                  <span className={`${advancedData.pePercentile > 80 ? 'text-rose-400 font-black' : advancedData.pePercentile < 30 ? 'text-emerald-400 font-black' : 'text-blue-400'}`}>
                     {advancedData.pePercentile > 80 ? '估值明顯承壓' : advancedData.pePercentile < 30 ? '深具安全邊際' : '估值中性合理'}
                   </span>
                 </div>
+
               </div>
             ) : (
               <div className="bg-surfaceLight/10 rounded-xl p-5 border border-surfaceLight border-l-4 border-l-rose-500">
@@ -164,6 +169,30 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
                  </div>
                ))}
             </div>
+
+            {/* INTEGRATED: Market Sentiment (formerly from DiagnosticHeader) */}
+            {advancedData?.sentiment && (
+              <div className="bg-surfaceLight/20 rounded-xl p-3 border border-surfaceLight/50 my-2">
+                <div className="flex justify-between items-center mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Icon name="local_fire_department" className={`text-sm ${advancedData.sentiment.status === '過熱' ? 'text-rose-500 animate-pulse' : 'text-textMuted'}`} />
+                    <span className="text-[10px] font-black text-textMuted uppercase tracking-widest">市場籌碼熱度</span>
+                  </div>
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${advancedData.sentiment.status === '過熱' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : (advancedData.sentiment.status === '冷清' ? 'bg-slate-700/50 text-textMuted border-white/5' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20')}`}>
+                    {advancedData.sentiment.status}
+                  </span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden flex shadow-inner border border-black/20">
+                  <div className="h-full bg-gradient-to-r from-rose-500 to-rose-400 transition-all duration-1000" style={{ width: `${advancedData.sentiment.retail}%` }}></div>
+                  <div className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-1000" style={{ width: `${advancedData.sentiment.institutional}%` }}></div>
+                </div>
+                <div className="flex justify-between mt-1.5 px-0.5">
+                   <span className="text-[9px] font-bold text-rose-400/80">散戶 {advancedData.sentiment.retail}%</span>
+                   <span className="text-[9px] font-bold text-blue-400/80">法人 {advancedData.sentiment.institutional}%</span>
+                </div>
+              </div>
+            )}
+
 
             {/* MOS and PEG Box */}
             {advancedData?.mos && (
