@@ -673,12 +673,14 @@ async def read_stock_health_check(
             elif avg_pe and avg_pe > 25: peer_valuation -= 15
             
             peer_profitability = 60
+            raw_gm = 0
+            raw_nm = 0
             if any(p.get("grossMargin") for p in peers):
-                avg_gm = sum(p["grossMargin"] for p in peers if p.get("grossMargin")) / max(1, len([p for p in peers if p.get("grossMargin")]))
-                peer_profitability = 40 + int(avg_gm)
+                raw_gm = sum(p["grossMargin"] for p in peers if p.get("grossMargin")) / max(1, len([p for p in peers if p.get("grossMargin")]))
+                peer_profitability = 40 + int(raw_gm)
             elif any(p.get("netMargin") for p in peers):
-                avg_nm = sum(p["netMargin"] for p in peers if p.get("netMargin")) / max(1, len([p for p in peers if p.get("netMargin")]))
-                peer_profitability = 40 + int(avg_nm)
+                raw_nm = sum(p["netMargin"] for p in peers if p.get("netMargin")) / max(1, len([p for p in peers if p.get("netMargin")]))
+                peer_profitability = 40 + int(raw_nm)
                 
             peer_growth = 55
             if any(p.get("revenueYoY") for p in peers):
@@ -693,7 +695,9 @@ async def read_stock_health_check(
                 "profitability": min(100, max(20, peer_profitability)),
                 "solvency": peer_solvency,
                 "growth": min(100, max(20, peer_growth)),
-                "valuation": min(100, max(20, peer_valuation))
+                "valuation": min(100, max(20, peer_valuation)),
+                "rawGrossMargin": round(raw_gm, 2) if raw_gm > 0 else None,
+                "rawNetMargin": round(raw_nm, 2) if raw_nm > 0 else None
             }
     except Exception as e:
         print(f"Error calculating peerAvgs: {e}")

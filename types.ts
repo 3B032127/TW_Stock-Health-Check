@@ -60,6 +60,7 @@ export interface AdvancedHealthData {
   peg?: number;
   fcfTrend?: { quarter: string; value: number }[];
   dividendHistory?: { year: number; amount: number; payoutRatio: number }[];
+  forwardYield?: number;
   decisionQuadrant?: 'Quality Undervalued' | 'Growth Premium' | 'Value Trap' | 'Fairly Valued';
   peerAvgs?: {
     total: number;
@@ -67,7 +68,16 @@ export interface AdvancedHealthData {
     solvency: number;
     growth: number;
     valuation: number;
+    rawGrossMargin?: number | null;
+    rawNetMargin?: number | null;
   };
+  beta?: number;
+  volatilityClass?: '防禦型 (低波動)' | '穩健型 (中波動)' | '攻擊型 (高波動)';
+  nextEvent?: { name: string; date: string; daysLeft: number };
+  sentiment?: { retail: number; institutional: number; status: '過熱' | '溫和' | '冷清' };
+  moatRadar?: { subject: string; score: number; fullMark: number }[];
+  moatKeywords?: string[];
+  profitStabilityZScore?: number;
 }
 
 export interface HealthCheckData {
@@ -138,6 +148,16 @@ export interface OwnershipData {
   directors: number;
   foreign: number;
   investmentTrust: number;
+  totalShares?: number;
+  foreignLimit?: number;
+  directorPledgeRatio?: number;
+  retailRatio?: number;
+  majorShareholdersCount?: number;
+  ownershipTrend?: { 
+    date: string; 
+    foreign: number; 
+    investmentTrust: number; 
+  }[];
 }
 
 // --- New Interfaces for Radar Engine ---
