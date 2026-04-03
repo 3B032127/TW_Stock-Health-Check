@@ -37,10 +37,7 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
   return (
     <div className="flex flex-col gap-8">
       {/* 診斷標頭 */}
-      <DiagnosticHeader 
-        decisionQuadrant={healthCheckData.advanced?.decisionQuadrant} 
-        aiSummary={healthCheckData.advanced?.prosCons?.aiSummary} 
-      />
+      <DiagnosticHeader data={healthCheckData.advanced} />
       
       {/* 第一排：同業對比與總分 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -106,7 +103,7 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8">
           {healthCheckData.advanced?.moat && (
-             <MoatCard items={healthCheckData.advanced.moat} score={healthCheckData.advanced.moatScore || 0} dividendHistory={healthCheckData.advanced.dividendHistory} />
+             <MoatCard advancedData={healthCheckData.advanced} items={healthCheckData.advanced.moat} score={healthCheckData.advanced.moatScore || 0} dividendHistory={healthCheckData.advanced.dividendHistory} />
           )}
         </div>
         <div className="lg:col-span-4">
