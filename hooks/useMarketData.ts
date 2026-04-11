@@ -1,5 +1,5 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { api } from '../services/api';
+import { api, API_BASE_URL } from '../services/api';
 import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { getRefetchInterval, getStaleTime, getIndicatorRefetchInterval } from '../utils/tradingHours';
 import { Stock } from '../types';
@@ -48,7 +48,7 @@ export function useTaixData(period: string) {
     const query = useQuery({
         queryKey: ['taiex', period],
         queryFn: async () => {
-            const response = await fetch(`http://localhost:8000/api/v1/market/taiex?period=${period}`);
+            const response = await fetch(`${API_BASE_URL}/market/taiex?period=${period}`);
             const result = await response.json();
 
             if (result.status === 'success' && result.data) {
@@ -82,7 +82,7 @@ export function useIndicators() {
     const query = useQuery({
         queryKey: ['indicators'],
         queryFn: async (): Promise<Indicator[]> => {
-            const response = await fetch('http://localhost:8000/api/v1/market/indicators');
+            const response = await fetch(`${API_BASE_URL}/market/indicators`);
             const result = await response.json();
 
             let apiIndicators: Indicator[] = [];
@@ -146,7 +146,7 @@ export function useIndicatorHistory(indicatorId: string, period: string) {
         queryKey: ['indicatorHistory', indicatorId, period],
         queryFn: async (): Promise<IndicatorHistoryData> => {
             // API call to the new endpoint
-            const response = await fetch(`http://localhost:8000/api/v1/market/indicators/${indicatorId}/history?period=${period}`);
+            const response = await fetch(`${API_BASE_URL}/market/indicators/${indicatorId}/history?period=${period}`);
             const result = await response.json();
 
             if (result.status === 'success' && result.data) {
@@ -188,7 +188,8 @@ export function useSectorData() {
     const query = useQuery({
         queryKey: ['market', 'sectors'],
         queryFn: async (): Promise<SectorData[]> => {
-            const response = await fetch('http://localhost:8000/api/market/heatmap');
+            const apiBase = API_BASE_URL.replace('/v1', '');
+            const response = await fetch(`${apiBase}/market/heatmap`);
             const result = await response.json();
             // FinMind wrapper returns {status: "success", data: [...]}
             // Adjust based on the actual response structure from main.py

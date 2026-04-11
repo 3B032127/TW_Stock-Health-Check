@@ -4,6 +4,7 @@ import { Icon } from '../App';
 import { INDICATOR_DETAILS, INDICATOR_CATEGORIES, generateHistoricalData } from '../indicatorDetails';
 import { loadMonitorLightData, getMonitorDataForPeriod, getLatestMonitorData, getSignalColor, getSignalDescription, type MonitorLightData } from '../monitorLightData';
 import { useIndicatorHistory, IndicatorHistoryPoint } from '../hooks/useMarketData';
+import { API_BASE_URL } from '../services/api';
 
 interface Indicator {
   id?: string;
@@ -77,7 +78,7 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
       try {
         setLoading(true);
         // Fetch API indicators
-        const response = await fetch('http://localhost:8000/api/v1/market/indicators');
+        const response = await fetch(`${API_BASE_URL}/market/indicators`);
         const result = await response.json();
 
         let apiIndicators: Indicator[] = [];

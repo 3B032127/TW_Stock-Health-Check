@@ -1,4 +1,5 @@
-export const API_BASE_URL = "http://localhost:8000/api/v1";
+const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+export const API_BASE_URL = hostname === 'localhost' ? "http://localhost:8000/api/v1" : `http://${hostname}:8000/api/v1`;
 
 export interface ApiResponse<T> {
     status: string;
