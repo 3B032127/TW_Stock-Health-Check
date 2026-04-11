@@ -575,15 +575,21 @@ class MarketIndicatorsService:
                                     if not market_data:
                                         continue
 
+                                    def get_val(obj, key, default=0):
+                                        val = obj.get(key, default)
+                                        if isinstance(val, dict):
+                                            return val.get('raw', default)
+                                        return val
+
                                     result = {
-                                        "price": float(market_data.get('price', 0)),
-                                        "volume": float(market_data.get('volume', 0)),
-                                        "turnover": float(market_data.get('turnoverM', 0)) * 1000000,
-                                        "high": float(market_data.get('high', 0)),
-                                        "low": float(market_data.get('low', 0)),
-                                        "open": float(market_data.get('open', 0)),
-                                        "change": float(market_data.get('change', 0)),
-                                        "changePercent": float(market_data.get('changePercent', 0))
+                                        "price": float(get_val(market_data, 'price', 0)),
+                                        "volume": float(get_val(market_data, 'volume', 0)),
+                                        "turnover": float(get_val(market_data, 'turnoverM', 0)) * 1000000,
+                                        "high": float(get_val(market_data, 'regularMarketDayHigh', market_data.get('high', 0))),
+                                        "low": float(get_val(market_data, 'regularMarketDayLow', market_data.get('low', 0))),
+                                        "open": float(get_val(market_data, 'regularMarketOpen', market_data.get('open', 0))),
+                                        "change": float(get_val(market_data, 'change', 0)),
+                                        "changePercent": float(get_val(market_data, 'changePercent', 0).replace('%', '') if isinstance(get_val(market_data, 'changePercent', '0'), str) else get_val(market_data, 'changePercent', 0))
                                     }
                                     return result
                                     
