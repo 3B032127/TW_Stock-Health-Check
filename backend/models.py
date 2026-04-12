@@ -135,3 +135,10 @@ class SyncMetadata(Base):
     last_updated = Column(BigInteger) # timestamp
     last_data_date = Column(String) # the max date or quarter available in DB
     __table_args__ = (UniqueConstraint('stock_id', 'data_type', name='uix_sync_metadata_stock_type'),)
+
+class MarketCapCache(Base):
+    __tablename__ = "market_cap_cache"
+    stock_id = Column(String, primary_key=True, index=True)
+    market_cap = Column(Float)
+    last_updated = Column(BigInteger)
+

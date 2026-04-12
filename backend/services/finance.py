@@ -10,6 +10,8 @@ import statistics
 from .. import models, schemas
 from .finmind import FinMindClient
 
+stock_list_cache = None
+
 def parse_taiwan_year(year_str: str) -> int:
     """Parses a year string which could be Gregorian (2025) or ROC (114)."""
     if not year_str: return datetime.now().year
@@ -290,6 +292,24 @@ async def get_cash_flow_history(db: Session, stock_id: str, limit: int = 8, forc
     return await fetch_and_sync_financial_history(db, stock_id, limit, models.CashFlowStatement, map_cash_flow, "TaiwanStockCashFlowsStatement", force_sync)
 
 async def calculate_health_check(db: Session, stock_id: str):
+    global stock_list_cache
+    
+    # Identify industry for sector-specific logic
+    target_industry = "其他"
+    if stock_list_cache is None:
+        client = FinMindClient()
+        try:
+            stock_list_cache = await client.fetch_stock_info()
+        except:
+            pass
+        finally:
+            await client.close()
+            
+    if stock_list_cache:
+        target_item = next((s for s in stock_list_cache if s['stock_id'] == stock_id), None)
+        if target_item:
+            target_industry = target_item.get('industry_category', '其他')
+
     # Fetch quarters for metrics & charting
     source_is, is_history = await get_income_statement_history(db, stock_id, limit=20)
     source_bs, bs_history = await get_balance_sheet_history(db, stock_id, limit=12)
@@ -555,54 +575,68 @@ async def calculate_health_check(db: Session, stock_id: str):
     elif health_score < 50 and pe_percentile < 30:
         decision_quadrant = "Value Trap"
 
-    import hashlib
-    hash_val = int(hashlib.md5(stock_id.encode()).hexdigest(), 16)
+    # 1. Beta / Volatility (Estimated based on industry and total score)
+    is_tech = any(keyword in target_industry for keyword in ['半導體', '電子', '電腦'])
+    base_beta = 1.2 if is_tech else 0.8
+    beta = round(base_beta + (0.2 if growth_score > 70 else -0.1), 2)
     
-    # 1. Beta / Volatility
-    beta = round(0.5 + (hash_val % 150) / 100.0, 2) # 0.5 to 2.0
-    if beta < 0.8:
+    if beta < 0.9:
         vol_class = '防禦型 (低波動)'
-    elif beta < 1.2:
+    elif beta < 1.1:
         vol_class = '穩健型 (中波動)'
     else:
         vol_class = '攻擊型 (高波動)'
         
-    # 2. Next Event (Mock)
-    days_left = 5 + (hash_val % 40)
-    event_type = '法說會' if hash_val % 2 == 0 else '除權息日'
-    event_date = (datetime.now() + timedelta(days=days_left)).strftime('%Y/%m/%d')
-    next_event = {"name": event_type, "date": event_date, "daysLeft": days_left}
+    # 2. Next Event (Deterministic based on Current Date)
+    # 假設財報公佈日大約在 3, 5, 8, 11 月
+    now = datetime.now()
+    next_month = {3: 5, 5: 8, 8: 11, 11: 3}.get(now.month, (now.month // 3 + 1) * 3)
+    event_date = f"{now.year if next_month > now.month else now.year+1}/{next_month:02d}/15"
+    next_event = {"name": "預計財報公佈", "date": event_date, "daysLeft": (datetime.strptime(event_date, "%Y/%m/%d") - now).days}
     
-    # 3. Sentiment
-    retail_heat = 20 + (hash_val % 60)
+    # 3. Sentiment (Based on Score)
+    retail_heat = 50 + (10 if total_score > 75 else -10)
     inst_heat = 100 - retail_heat
-    if retail_heat > 60:
-        sent_status = '過熱'
-    elif inst_heat > 70:
-        sent_status = '溫和' # 法人控盤通常偏向穩健溫和
-    else:
-        sent_status = '冷清'
+    sent_status = '過熱' if total_score > 85 else '平穩' if total_score > 50 else '冷清'
     sentiment = {"retail": retail_heat, "institutional": inst_heat, "status": sent_status}
     
-    # 4. Moat Radar Data
+    # 4. Moat Radar Data (100% Data Driven)
+    # 技術優勢: 基於毛利率與獲利穩定性
+    tech_advantage = min(100, int(gross_margin * 1.5)) 
+    # 規模經濟: 基於營收規模與市值 (簡化判斷)
+    economies_of_scale = min(100, int(total_score * 0.5 + 40 if latest_is.revenue > 100000000 else total_score * 0.5 + 20))
+    # 營運效率: 杜邦分析中的資產週轉率
+    ops_efficiency = min(100, int(asset_turnover * 50 + profit_score * 0.5))
+    # 資本壁壘: 淨資產規模
+    capital_barrier = min(100, int(solv_score * 0.6 + (30 if latest_bs.shareholders_equity > 1000000000 else 10)))
+    # 品牌價值: 淨利率與其一致性
+    brand_value = min(100, int(net_margin * 2 + 30))
+
     moat_radar = [
-        {"subject": "營運效率", "score": min(100, int(profit_score * 0.6 + moat_score * 0.4 + (hash_val % 10))), "fullMark": 100},
-        {"subject": "資本壁壘", "score": min(100, int(solv_score * 0.8 + (hash_val % 15))), "fullMark": 100},
-        {"subject": "技術優勢", "score": min(100, int(profit_score * 1.0 - (hash_val % 20))), "fullMark": 100},
-        {"subject": "規模經濟", "score": min(100, int(total_score + (hash_val % 5))), "fullMark": 100},
-        {"subject": "品牌價值", "score": min(100, int(moat_score * 0.8 + (hash_val % 25))), "fullMark": 100}
+        {"subject": "營運效率", "score": ops_efficiency, "fullMark": 100},
+        {"subject": "資本壁壘", "score": capital_barrier, "fullMark": 100},
+        {"subject": "技術優勢", "score": tech_advantage, "fullMark": 100},
+        {"subject": "規模經濟", "score": economies_of_scale, "fullMark": 100},
+        {"subject": "品牌價值", "score": brand_value, "fullMark": 100}
     ]
     
     # 5. Moat Keywords
     keywords = []
-    if moat_radar[3]["score"] > 80: keywords.append("規模經濟")
-    if moat_radar[2]["score"] > 80: keywords.append("技術專利")
-    if moat_radar[0]["score"] > 80: keywords.append("網絡效應")
-    if not keywords: keywords.append("轉換成本")
-    if len(keywords) < 2: keywords.append("無形資產")
+    if tech_advantage > 75: keywords.append("技術領先")
+    if economies_of_scale > 75: keywords.append("規模優勢")
+    if ops_efficiency > 75: keywords.append("高效營運")
+    if not keywords: keywords.append("穩定獲利")
+    if len(keywords) < 2: keywords.append("財務穩健")
     
-    # 6. Profit Stability (Z-Score Mock)
-    z_score = round(1.0 + (hash_val % 200) / 100.0, 2) # 1.0 to 3.0
+    # 6. Profit Stability (Z-Score) - 改用真實獲利標準差估計
+    net_incomes = [i.net_income for i in is_history if i.net_income is not None]
+    if len(net_incomes) > 4:
+        import statistics
+        mean_ni = sum(net_incomes) / len(net_incomes)
+        std_ni = statistics.stdev(net_incomes)
+        z_score = round(mean_ni / std_ni, 2) if std_ni > 0 else 3.0
+    else:
+        z_score = 1.0
 
     advanced_data = {
         "dupont": {
