@@ -66,7 +66,7 @@ const SyncIndicator: React.FC<SyncIndicatorProps> = ({ isFetching, lastUpdated, 
         dotColor = '#10b981';
         textColor = '#10b981';
         borderColor = 'rgba(16, 185, 129, 0.4)';
-    } else if (isStale) {
+    } else if (isStale && lastUpdated) {
         dotColor = '#fbbf24'; // amber
         textColor = '#fbbf24';
         borderColor = 'rgba(251, 191, 36, 0.5)';
@@ -150,7 +150,7 @@ const SyncIndicator: React.FC<SyncIndicatorProps> = ({ isFetching, lastUpdated, 
             >
                 {isFetching ? (
                     <span style={{ fontWeight: 600 }}>數據更新中...</span>
-                ) : isStale ? (
+                ) : (isStale && lastUpdated) ? (
                     <>
                         <span style={{ fontWeight: 600 }}>發現新資料</span>
                         <span style={{

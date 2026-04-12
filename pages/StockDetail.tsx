@@ -12,19 +12,62 @@ import { FinancialTable } from '../components/stock-detail/FinancialTable';
 import { AIAnalysisCard } from '../components/AIAnalysisCard';
 import SyncIndicator from '../components/SyncIndicator';
 import { useStockSync } from '../hooks/useStockSync';
+import { useDividends } from '../hooks/useDividends';
+import { useRevenueMix } from '../hooks/useRevenueMix';
+import { useValuationMetrics } from '../hooks/useValuationMetrics';
+import { useHealthCheck } from '../hooks/useHealthCheck';
+import { useCompanyNews } from '../hooks/useCompanyNews';
+import { useOwnershipData } from '../hooks/useOwnershipData';
+import { usePeerComparison } from '../hooks/usePeerComparison';
 
 const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNavigateToStock?: (id: string) => void }> = ({ stockId = "2330", onNavigateHome, onNavigateToStock }) => {
   const [activeTab, setActiveTab] = useState<StockTab>(StockTab.PROFILE); // Default set to PROFILE
   const [activeSubTab, setActiveSubTab] = useState<FinancialSubTab>(FinancialSubTab.INCOME);
-  const { data: profile } = useCompanyProfile(stockId);
+  const { data: profile, isLoading: isProfileLoading } = useCompanyProfile(stockId);
   const { data: financialsData, isLoading: isFinancialsLoading } = useFinancials(stockId);
   const { syncStatus, isSyncing, triggerSync } = useStockSync(stockId);
+  const { isLoading: isDividendsLoading } = useDividends(stockId);
+  const { isLoading: isRevenueMixLoading } = useRevenueMix(stockId);
+  const { isLoading: isValuationLoading } = useValuationMetrics(stockId);
+  const { isLoading: isHealthCheckLoading } = useHealthCheck(stockId);
+  const { isLoading: isNewsLoading } = useCompanyNews(stockId);
+  const { isLoading: isOwnershipLoading } = useOwnershipData(stockId);
+  const { isLoading: isPeerLoading } = usePeerComparison(stockId);
+
+  // Consider the page ready only when all critical components are loaded
+  // IMPORTANT: For new stocks, we wait for the background sync to finish as well
+  const isPageReady = !isProfileLoading && !isFinancialsLoading && !isDividendsLoading && !isRevenueMixLoading && 
+                      !isValuationLoading && !isHealthCheckLoading && !isNewsLoading && !isOwnershipLoading && 
+                      !isPeerLoading && (profile || !isSyncing);
+
+  // Auto-sync for new stocks (if profile is null and we are not already syncing)
+  useEffect(() => {
+    if (isPageReady && !profile && !isSyncing && syncStatus?.is_stale) {
+      console.log("Auto-triggering sync for new stock...");
+      triggerSync();
+    }
+  }, [isPageReady, profile, isSyncing, syncStatus, triggerSync]);
 
   // Reset tabs when stockId changes (e.g., from searching a new stock)
   useEffect(() => {
     setActiveTab(StockTab.PROFILE);
     setActiveSubTab(FinancialSubTab.INCOME);
   }, [stockId]);
+
+  if (!isPageReady) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 animate-pulse">
+        <div className="relative size-20">
+          <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
+          <div className="absolute inset-0 border-4 border-t-primary rounded-full animate-spin"></div>
+        </div>
+        <div className="flex flex-col items-center gap-2">
+          <h3 className="text-xl font-bold text-white tracking-widest">資料同步中</h3>
+          <p className="text-textMuted text-sm">正在從資料庫與 Yahoo 抓取最新數據...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in relative">
@@ -60,7 +103,7 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
               {profile ? profile.industry : '載入中'}
             </span>
           </div>
-          <p className="text-textMuted text-sm md:text-base max-w-2xl truncate">
+          <p className="text-textMuted text-sm md:text-base max-w-2xl">
             {profile ? profile.description : '公司簡介資料載入中...'}
           </p>
         </div>
@@ -128,29 +171,20 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
                 </button>
               ))}
             </div>
-            {isFinancialsLoading && (
-              <div className="text-sm text-textMuted animate-pulse flex items-center gap-2">
-                <Icon className="text-[18px]" name="sync" /> 資料載入中...
-              </div>
-            )}
           </div>
 
-          {!isFinancialsLoading && financialsData && (
-            <>
-              <FinancialChart 
-                subTab={activeSubTab} 
-                chartData={
-                  activeSubTab === FinancialSubTab.INCOME ? financialsData?.income?.chartData || [] : 
-                  activeSubTab === FinancialSubTab.BALANCE ? financialsData?.balance?.chartData || [] : 
-                  financialsData?.cashFlow?.chartData || []
-                } 
-              />
+          <FinancialChart 
+            subTab={activeSubTab} 
+            chartData={
+              activeSubTab === FinancialSubTab.INCOME ? financialsData?.income?.chartData || [] : 
+              activeSubTab === FinancialSubTab.BALANCE ? financialsData?.balance?.chartData || [] : 
+              financialsData?.cashFlow?.chartData || []
+            } 
+          />
 
-              {activeSubTab === FinancialSubTab.INCOME && financialsData.income && <FinancialTable headers={financialsData.income.tableData.headers} rows={financialsData.income.tableData.rows} />}
-              {activeSubTab === FinancialSubTab.BALANCE && financialsData.balance && <FinancialTable headers={financialsData.balance.tableData.headers} rows={financialsData.balance.tableData.rows} />}
-              {activeSubTab === FinancialSubTab.CASH_FLOW && financialsData.cashFlow && <FinancialTable headers={financialsData.cashFlow.tableData.headers} rows={financialsData.cashFlow.tableData.rows} />}
-            </>
-          )}
+          {activeSubTab === FinancialSubTab.INCOME && financialsData?.income && <FinancialTable headers={financialsData.income.tableData.headers} rows={financialsData.income.tableData.rows} />}
+          {activeSubTab === FinancialSubTab.BALANCE && financialsData?.balance && <FinancialTable headers={financialsData.balance.tableData.headers} rows={financialsData.balance.tableData.rows} />}
+          {activeSubTab === FinancialSubTab.CASH_FLOW && financialsData?.cashFlow && <FinancialTable headers={financialsData.cashFlow.tableData.headers} rows={financialsData.cashFlow.tableData.rows} />}
 
           {/* AI Analysis */}
           <AIAnalysisCard type="financial" title="財務數據趨勢解讀" defaultExpanded={true} />

@@ -14,7 +14,7 @@ interface Props {
 export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, industrySector, hoveredDimension, setHoveredDimension }) => {
     const radarData = useMemo(() => {
         const today = new Date().toISOString().split('T')[0];
-        const cacheKey = `radar_peers_${mainStock.id}_${today}`;
+        const cacheKey = `radar_v2_${mainStock.id}_${today}`;
         
         // 嘗試從 sessionStorage 讀取快取
         const cachedData = sessionStorage.getItem(cacheKey);
@@ -117,7 +117,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
             onMouseLeave={() => setIsMouseOverChart(false)}
         >
             <h4 className="absolute top-4 left-4 text-sm font-bold text-textMuted uppercase tracking-wider z-10">
-                動態同業對標雷達圖 (PR 百分位數)
+                真實財報量化同業對標雷達圖 (PR 百分位數)
             </h4>
 
             <ResponsiveContainer width="100%" height="100%" className="relative z-10">
