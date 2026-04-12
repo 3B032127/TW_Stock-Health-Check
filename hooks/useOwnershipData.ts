@@ -16,7 +16,7 @@ export const useOwnershipData = (stockId: string) => {
             const response = await api.getOwnershipData(stockId);
             return response.data;
         },
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        staleTime: 24 * 60 * 60 * 1000, // 24 hours
         retry: 2,
     });
 };

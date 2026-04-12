@@ -9,6 +9,6 @@ export const useDividends = (stockId: string) => {
             return response.data || [];
         },
         enabled: !!stockId,
-        staleTime: 1000 * 60 * 60, // 1 hour
+        staleTime: 1000 * 60 * 60 * 24, // 24 hours, dividends rarely change
     });
 };

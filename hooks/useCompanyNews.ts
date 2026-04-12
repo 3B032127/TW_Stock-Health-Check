@@ -9,6 +9,6 @@ export const useCompanyNews = (stockId: string) => {
             return response.data || [];
         },
         enabled: !!stockId,
-        staleTime: 1000 * 60 * 5, // 5 minutes cache for news
+        staleTime: 1000 * 60 * 30, // 30 minutes cache for news
     });
 };
