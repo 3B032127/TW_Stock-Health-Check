@@ -56,7 +56,7 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
       activeTab === 'SYNCED' ? s.lastSyncTime > 0 : 
       !s.lastSyncTime;
     return matchesSearch && matchesTab;
-  });
+  }).sort((a, b) => a.id.localeCompare(b.id));
 
   const renderFreshnessBadge = (lastUpdated: number) => {
     if (!lastUpdated) return <span className="text-xs px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400">部分快取</span>;

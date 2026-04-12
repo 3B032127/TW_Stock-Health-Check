@@ -60,16 +60,7 @@ export const OwnershipSummary = ({ stockId }: { stockId: string }) => {
         股權與籌碼摘要
       </h3>
 
-      {isLoading ? (
-        <div className="space-y-4 animate-pulse pt-4">
-          <div className="h-48 w-48 mx-auto bg-surfaceLight rounded-full"></div>
-          <div className="flex justify-center gap-4 mt-6">
-            <div className="h-4 w-16 bg-surfaceLight rounded"></div>
-            <div className="h-4 w-16 bg-surfaceLight rounded"></div>
-            <div className="h-4 w-16 bg-surfaceLight rounded"></div>
-          </div>
-        </div>
-      ) : error || !data ? (
+      {error || (!data && !isLoading) ? (
         <div className="py-12 text-center">
           <span className="text-textMuted text-sm">暫無股權資料</span>
         </div>

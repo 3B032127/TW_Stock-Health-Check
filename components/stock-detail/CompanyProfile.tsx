@@ -17,18 +17,7 @@ import { usePeerComparison } from '../../hooks/usePeerComparison';
 const PeerComparisonSection = ({ stockId }: { stockId: string }) => {
   const { data, isLoading, error } = usePeerComparison(stockId);
 
-  if (isLoading) {
-    return (
-      <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex items-center justify-center animate-pulse min-h-[200px]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-textMuted text-sm">載入同業資料中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !data || !data.peers || data.peers.length === 0) {
+  if (error || (!data && !isLoading) || !data?.peers || data.peers.length === 0) {
     return (
       <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col items-center justify-center min-h-[200px]">
         <Icon name="compare_arrows" className="text-4xl text-surfaceLight mb-2" />
@@ -49,19 +38,9 @@ const PeerComparisonSection = ({ stockId }: { stockId: string }) => {
 
 export const CompanyProfile = ({ stockId }: { stockId: string }) => {
   const { data: profile, isLoading, error } = useCompanyProfile(stockId);
-  const { data: dividends, isLoading: isDivLoading } = useDividends(stockId);
-  const { data: revenueMix, isLoading: isRevLoading } = useRevenueMix(stockId);
+  const { data: dividends } = useDividends(stockId);
 
-  if (isLoading || isDivLoading || isRevLoading) {
-    return (
-      <div className="flex flex-col gap-6 items-center justify-center p-12">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-textMuted">載入資料中...</p>
-      </div>
-    );
-  }
-
-  if (error || !profile) {
+  if (error || (!profile && !isLoading)) {
     return (
       <div className="flex flex-col gap-6 items-center justify-center p-12 bg-surface/50 rounded-xl border border-surfaceLight">
         <Icon name="error_outline" className="text-4xl text-rose-500 mb-2" />
@@ -70,6 +49,8 @@ export const CompanyProfile = ({ stockId }: { stockId: string }) => {
       </div>
     );
   }
+
+  if (!profile) return null;
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">

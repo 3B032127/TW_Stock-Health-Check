@@ -13,14 +13,7 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
   const { data: healthCheckData, isLoading: isHealthCheckLoading } = useHealthCheck(stockId);
   const { data: profile } = useCompanyProfile(stockId);
 
-  if (isHealthCheckLoading) {
-    return (
-      <div className="flex flex-col gap-6 items-center justify-center p-12">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-textMuted">載入財報健檢資料中...</p>
-      </div>
-    );
-  }
+  if (isHealthCheckLoading) return null;
 
   if (!healthCheckData || (healthCheckData as any)._isNoData) {
     return (

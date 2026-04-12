@@ -142,20 +142,7 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
 
   const modalContent = getModalContent();
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 animate-pulse">
-        {[1, 2, 3, 4, 5].map(i => (
-          <div key={i} className="bg-surface border border-surfaceLight rounded-xl p-5 h-[104px]">
-            <div className="h-4 bg-surfaceLight w-16 mb-4 rounded"></div>
-            <div className="h-6 bg-surfaceLight w-24 rounded"></div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (error || !data) {
+  if (error || (!data && !isLoading)) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {[1, 2, 3, 4, 5].map(i => (
@@ -166,6 +153,8 @@ export const ValuationMetrics = ({ stockId }: { stockId: string }) => {
       </div>
     );
   }
+
+  if (!data) return null;
 
   return (
     <>

@@ -58,13 +58,7 @@ const CompanyNews: React.FC<CompanyNewsProps> = ({ stockId }) => {
 
             {/* 依據不同狀態渲染不同的畫面 */}
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {isLoading ? (
-                    // 狀態 1：載入中 (Loading)
-                    <div className="flex flex-col items-center justify-center py-8 opacity-70">
-                        <div className="w-8 h-8 rounded-full border-4 border-surfaceLight border-t-primary animate-spin mb-3"></div>
-                        <p className="text-textMuted text-sm">正在載入最新新聞...</p>
-                    </div>
-                ) : error ? (
+                {error ? (
                     // 狀態 2：發生錯誤 (Error)
                     <div className="flex flex-col items-center justify-center py-8 text-center text-rose-400">
                         <Icon name="error_outline" className="text-3xl mb-2 opacity-80" />
