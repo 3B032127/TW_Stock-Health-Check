@@ -184,7 +184,7 @@ class MarketIndicatorsService:
         
         try:
             # Use Gemini to search and analyze TSMC news
-            model = genai.GenerativeModel('gemini-pro')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             prompt = """
             請分析台積電(TSMC)目前的市場展望。請考慮以下因素：
@@ -349,7 +349,7 @@ class MarketIndicatorsService:
             return None
         
         try:
-            model = genai.GenerativeModel('gemini-pro')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             cpi = data.get('cpi', {}).get('value', 0)
             ppi = data.get('ppi', {}).get('value', 0)

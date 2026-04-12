@@ -95,12 +95,21 @@ class YahooStockCrawler:
         try:
             import yfinance as yf
             
-            # 建立 ticker（台股需要加 .TW 後綴）
-            ticker_symbol = f"{stock_id}.TW"
-            ticker = yf.Ticker(ticker_symbol)
-            
-            # 獲取股票資訊
-            info = ticker.info
+            # 嘗試 yfinance 抓取英文資訊，若被阻擋則提供空字典
+            info = {}
+            try:
+                # 建立 ticker（台股判斷：上市加 .TW，上櫃加 .TWO）
+                # 優先嘗試 .TW，若查無資料則嘗試 .TWO
+                ticker_symbol = f"{stock_id}.TW"
+                ticker = yf.Ticker(ticker_symbol)
+                info = ticker.info
+                
+                if not info or not (info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')):
+                     ticker_symbol = f"{stock_id}.TWO"
+                     ticker = yf.Ticker(ticker_symbol)
+                     info = ticker.info
+            except Exception as yf_err:
+                print(f"yfinance fetch warning in details for {stock_id}: {yf_err}")
             
             # 獲取當前價格和前一日收盤價
             current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0)
@@ -108,13 +117,16 @@ class YahooStockCrawler:
             
             # 如果沒有 currentPrice，嘗試從 history 獲取最新價格
             if not current_price or current_price == 0:
-                hist = ticker.history(period='2d')
-                if not hist.empty:
-                    current_price = float(hist['Close'].iloc[-1])
-                    if len(hist) > 1:
-                        previous_close = float(hist['Close'].iloc[-2])
-                    else:
-                        previous_close = current_price
+                try:
+                    hist = ticker.history(period='2d')
+                    if not hist.empty:
+                        current_price = float(hist['Close'].iloc[-1])
+                        if len(hist) > 1:
+                            previous_close = float(hist['Close'].iloc[-2])
+                        else:
+                            previous_close = current_price
+                except Exception as yf_hist_err:
+                    print(f"yfinance history fetch warning for {stock_id}: {yf_hist_err}")
             
             # 計算漲跌
             change = current_price - previous_close
@@ -152,8 +164,15 @@ class YahooStockCrawler:
             股票中文名稱
         """
         try:
+            # 嘗試 .TW
             url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW"
             response = await self.client.get(url)
+            
+            # 若為 404 則嘗試 .TWO (上櫃)
+            if response.status_code == 404:
+                url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TWO"
+                response = await self.client.get(url)
+            
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -252,17 +271,34 @@ class YahooStockCrawler:
             from datetime import datetime
             from dateutil.relativedelta import relativedelta
             
-            ticker_symbol = f"{stock_id}.TW"
-            ticker = yf.Ticker(ticker_symbol)
-            info = ticker.info
+            # 嘗試 yfinance 抓取英文資訊，若被阻擋則提供空字典
+            info = {}
+            try:
+                ticker_symbol = f"{stock_id}.TW"
+                ticker = yf.Ticker(ticker_symbol)
+                info = ticker.info
+                # 處理可能是 list 或 dict 的情況
+                if isinstance(info, list):
+                    info = {}
+                elif not info:
+                    info = {}
+            except Exception as yf_err:
+                print(f"yfinance fetch warning for {stock_id}: {yf_err}")
             
             # 從 Yahoo TW 股市頁面獲取中文公司資訊 (補充 yfinance 英文資訊的不足)
-            url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW/profile"
+            # 判斷網址後綴
+            suffix = "TW"
+            url = f"https://tw.stock.yahoo.com/quote/{stock_id}.{suffix}/profile"
             chinese_profile = {}
             
             try:
                 from bs4 import BeautifulSoup
                 response = await self.client.get(url)
+                if response.status_code == 404:
+                    suffix = "TWO"
+                    url = f"https://tw.stock.yahoo.com/quote/{stock_id}.{suffix}/profile"
+                    response = await self.client.get(url)
+                
                 if response.status_code == 200:
                     text = response.text
                     soup = BeautifulSoup(text, 'html.parser')
@@ -474,9 +510,14 @@ class YahooStockCrawler:
         if not self.client:
             await self.init()
             
+        # 嘗試 .TW
         url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW/news"
         try:
             response = await self.client.get(url, follow_redirects=True)
+            if response.status_code == 404:
+                url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TWO/news"
+                response = await self.client.get(url, follow_redirects=True)
+                
             if response.status_code != 200:
                 print(f"Failed to fetch news for {stock_id}: status {response.status_code}")
                 return []

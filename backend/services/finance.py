@@ -212,17 +212,19 @@ async def get_cash_flow(db: Session, stock_id: str, year: int, quarter: int):
     return "api", None
 
 
-async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: int, model_class, map_func, dataset: str):
+async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: int, model_class, map_func, dataset: str, force_sync: bool = False):
     db_items = db.query(model_class).filter_by(stock_id=stock_id)\
                  .order_by(model_class.year.desc(), model_class.quarter.desc()).limit(limit).all()
     
-    # If we have enough history in DB, just return
-    if len(db_items) >= limit:
+    # If not forcing sync and we have some data, or if we are not forcing sync at all
+    if not force_sync:
         return "db", db_items
+
     
     end_date = datetime.now().strftime("%Y-%m-%d")
-    # Fetch past 4 years to ensure covering up to 12-16 quarters
-    start_date = (datetime.now() - timedelta(days=365*4)).strftime("%Y-%m-%d")
+    # Fetch past 10 years if forced, else 4 years
+    years_to_fetch = 10 if force_sync else 4
+    start_date = (datetime.now() - timedelta(days=365*years_to_fetch)).strftime("%Y-%m-%d")
     
     client = FinMindClient()
     data_list = await client.fetch_data(dataset, stock_id, start_date, end_date)
@@ -278,14 +280,14 @@ async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: in
     return source, final_items
 
 
-async def get_income_statement_history(db: Session, stock_id: str, limit: int = 8):
-    return await fetch_and_sync_financial_history(db, stock_id, limit, models.FinancialStatement, map_income_statement, "TaiwanStockFinancialStatements")
+async def get_income_statement_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.FinancialStatement, map_income_statement, "TaiwanStockFinancialStatements", force_sync)
 
-async def get_balance_sheet_history(db: Session, stock_id: str, limit: int = 8):
-    return await fetch_and_sync_financial_history(db, stock_id, limit, models.BalanceSheet, map_balance_sheet, "TaiwanStockBalanceSheet")
+async def get_balance_sheet_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.BalanceSheet, map_balance_sheet, "TaiwanStockBalanceSheet", force_sync)
 
-async def get_cash_flow_history(db: Session, stock_id: str, limit: int = 8):
-    return await fetch_and_sync_financial_history(db, stock_id, limit, models.CashFlowStatement, map_cash_flow, "TaiwanStockCashFlowsStatement")
+async def get_cash_flow_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.CashFlowStatement, map_cash_flow, "TaiwanStockCashFlowsStatement", force_sync)
 
 async def calculate_health_check(db: Session, stock_id: str):
     # Fetch quarters for metrics & charting
