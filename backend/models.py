@@ -126,3 +126,12 @@ class EconomicIndicator(Base):
     value = Column(Float)
     
     __table_args__ = (UniqueConstraint('indicator', 'date', name='uix_economic_indicators_indicator_date'),)
+
+class SyncMetadata(Base):
+    __tablename__ = "sync_metadata"
+    id = Column(Integer, primary_key=True, index=True)
+    stock_id = Column(String, index=True)
+    data_type = Column(String, index=True) # price, finance, chips, dividends
+    last_updated = Column(BigInteger) # timestamp
+    last_data_date = Column(String) # the max date or quarter available in DB
+    __table_args__ = (UniqueConstraint('stock_id', 'data_type', name='uix_sync_metadata_stock_type'),)

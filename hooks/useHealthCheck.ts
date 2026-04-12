@@ -7,9 +7,13 @@ export const useHealthCheck = (stockId: string) => {
         queryKey: ['healthCheck', stockId],
         queryFn: async () => {
             const response = await api.getHealthCheck(stockId);
+            
+            if (response.status === 'no_data') {
+                return { _isNoData: true } as any;
+            }
+            
             const data = response.data as HealthCheckData;
 
-            // Inject advanced mock data for the new UI until backend is updated for Phase 3/4
             // Inject advanced mock data for the new UI until backend is updated for Phase 5
             if (!data.advanced) {
                 // @ts-ignore - temporary fallback if backend hasn't deployed

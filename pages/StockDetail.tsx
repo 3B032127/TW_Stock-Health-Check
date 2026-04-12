@@ -10,12 +10,15 @@ import { HealthCheckTab } from '../components/stock-detail/HealthCheckTab';
 import { FinancialChart } from '../components/stock-detail/FinancialChart';
 import { FinancialTable } from '../components/stock-detail/FinancialTable';
 import { AIAnalysisCard } from '../components/AIAnalysisCard';
+import SyncIndicator from '../components/SyncIndicator';
+import { useStockSync } from '../hooks/useStockSync';
 
 const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNavigateToStock?: (id: string) => void }> = ({ stockId = "2330", onNavigateHome, onNavigateToStock }) => {
   const [activeTab, setActiveTab] = useState<StockTab>(StockTab.PROFILE); // Default set to PROFILE
   const [activeSubTab, setActiveSubTab] = useState<FinancialSubTab>(FinancialSubTab.INCOME);
   const { data: profile } = useCompanyProfile(stockId);
   const { data: financialsData, isLoading: isFinancialsLoading } = useFinancials(stockId);
+  const { syncStatus, isSyncing, triggerSync } = useStockSync(stockId);
 
   // Reset tabs when stockId changes (e.g., from searching a new stock)
   useEffect(() => {
@@ -24,7 +27,14 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
   }, [stockId]);
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
+    <div className="flex flex-col gap-6 animate-fade-in relative">
+      <SyncIndicator 
+        isFetching={isSyncing} 
+        isStale={syncStatus?.is_stale} 
+        lastUpdated={syncStatus?.last_updated || undefined} 
+        onSyncRequest={triggerSync} 
+      />
+      
       {/* Breadcrumb */}
       <nav className="flex flex-wrap text-sm font-medium text-textMuted">
         <ol className="flex items-center gap-2">

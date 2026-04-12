@@ -4,18 +4,23 @@ from .. import models
 from .finmind import FinMindClient
 import asyncio
 
-async def get_chips_data(db: Session, stock_id: str, days: int = 30):
+async def get_chips_data(db: Session, stock_id: str, days: int = 30, force_sync: bool = False):
     end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     
-    # 1. Check DB
+    # 1. Fetch from DB
     db_items = db.query(models.ChipsDaily).filter(
-        models.ChipsDaily.stock_id == stock_id,
-        models.ChipsDaily.date >= start_date
+        models.ChipsDaily.stock_id == stock_id
     ).order_by(models.ChipsDaily.date.asc()).all()
 
-    if len(db_items) >= int(days * 0.6): 
-        return "db", db_items
+    # If we are not forcing sync, return DB data
+    if not force_sync:
+        # DB queries return everything, we will truncate to `days` at return or let frontend handle it.
+        # But we filter here
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        return "db", [i for i in db_items if i.date >= start_date]
+
+    # For forced sync, we fetch 5 years
+    start_date = (datetime.now() - timedelta(days=365*5)).strftime("%Y-%m-%d")
 
     # 2. Fetch from API
     client = FinMindClient()
@@ -23,7 +28,8 @@ async def get_chips_data(db: Session, stock_id: str, days: int = 30):
     await client.close()
 
     if not data_list:
-        return "api", db_items 
+        return "api", db_items
+
 
     # 3. Insert/Update
     grouped_by_date = {}
@@ -56,23 +62,26 @@ async def get_chips_data(db: Session, stock_id: str, days: int = 30):
         db.rollback()
         
     final_items = db.query(models.ChipsDaily).filter(
-        models.ChipsDaily.stock_id == stock_id,
-        models.ChipsDaily.date >= start_date
+        models.ChipsDaily.stock_id == stock_id
     ).order_by(models.ChipsDaily.date.asc()).all()
     
-    return "api", final_items
+    # Return constrained days for the UI
+    ui_start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    return "api", [i for i in final_items if i.date >= ui_start_date]
 
-async def get_stock_price(db: Session, stock_id: str, days: int = 180):
+async def get_stock_price(db: Session, stock_id: str, days: int = 180, force_sync: bool = False):
     end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     
     db_items = db.query(models.StockPriceDaily).filter(
-        models.StockPriceDaily.stock_id == stock_id,
-        models.StockPriceDaily.date >= start_date
+        models.StockPriceDaily.stock_id == stock_id
     ).order_by(models.StockPriceDaily.date.asc()).all()
     
-    if len(db_items) >= int(days * 0.6):
-        return "db", db_items
+    if not force_sync:
+        ui_start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        return "db", [i for i in db_items if i.date >= ui_start_date]
+        
+    # For forced sync, fetch 5 years
+    start_date = (datetime.now() - timedelta(days=365*5)).strftime("%Y-%m-%d")
         
     client = FinMindClient()
     data_list = await client.fetch_price(stock_id, start_date, end_date)
@@ -100,16 +109,16 @@ async def get_stock_price(db: Session, stock_id: str, days: int = 180):
         db.rollback()
         
     final_items = db.query(models.StockPriceDaily).filter(
-        models.StockPriceDaily.stock_id == stock_id,
-        models.StockPriceDaily.date >= start_date
+        models.StockPriceDaily.stock_id == stock_id
     ).order_by(models.StockPriceDaily.date.asc()).all()
     
-    return "api", final_items
+    ui_start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    return "api", [i for i in final_items if i.date >= ui_start_date]
 
-async def get_dividend_data(db: Session, stock_id: str):
+async def get_dividend_data(db: Session, stock_id: str, force_sync: bool = False):
     db_items = db.query(models.Dividend).filter_by(stock_id=stock_id).order_by(models.Dividend.year.desc()).all()
     
-    if len(db_items) > 0:
+    if not force_sync:
         return "db", db_items
         
     client = FinMindClient()
@@ -308,6 +317,10 @@ async def get_ownership_data(db: Session, stock_id: str):
         url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW/profile"
         async with httpx.AsyncClient(headers={'User-Agent': 'Mozilla/5.0'}) as http_client:
             resp = await http_client.get(url, timeout=10.0)
+            if resp.status_code == 404:
+                url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TWO/profile"
+                resp = await http_client.get(url, timeout=10.0)
+                
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 texts = list(soup.stripped_strings)

@@ -22,12 +22,29 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
     );
   }
 
-  if (!healthCheckData) {
+  if (!healthCheckData || (healthCheckData as any)._isNoData) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 bg-surface/50 rounded-xl border border-surfaceLight">
-        <Icon name="error_outline" className="text-4xl text-rose-500 mb-2" />
-        <p className="text-white font-medium">無法載入財報健檢資料</p>
-        <p className="text-sm text-textMuted">請確認財報數據已同步或稍後再試</p>
+      <div className="flex flex-col items-center justify-center p-16 bg-surface/30 rounded-2xl border border-surfaceLight/50 backdrop-blur-sm relative overflow-hidden">
+        {/* Background Decoration */}
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500/0 via-amber-500/50 to-amber-500/0"></div>
+        <div className="absolute -bottom-24 -right-24 size-64 bg-amber-500/5 rounded-full blur-3xl"></div>
+        
+        <div className="size-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-6 border border-amber-500/20">
+          <Icon name="database" className="text-3xl text-amber-400 animate-pulse" />
+        </div>
+        
+        <h3 className="text-xl font-bold text-white mb-2">需要同步財報數據</h3>
+        <p className="text-textMuted text-center max-w-md mb-8">
+          這是一支新搜尋的股票，為了提供精確的 10 年亮點與護城河分析，
+          我們需要從 API 抓取歷史財報數據並存儲於本地資料庫中。
+        </p>
+        
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2 px-4 py-2 bg-surfaceLight/50 rounded-full border border-white/5 text-xs text-amber-200">
+            <Icon name="info" className="text-sm" />
+            <span>請點擊頁面右上方「發現新資料」按鈕執行同步</span>
+          </div>
+        </div>
       </div>
     );
   }
