@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import StockDetail from './pages/StockDetail';
 import EconomicIndicators from './pages/EconomicIndicators';
 import ApiTesting from './pages/ApiTesting';
+import DatabaseManager from './pages/DatabaseManager';
 import SearchBar from './components/SearchBar';
 
 // --- Icons Component Helper ---
@@ -59,6 +60,13 @@ const Header = ({
             className={`text-sm font-medium transition-colors ${currentView === ViewState.API_TESTING ? 'text-primary' : 'text-textMuted hover:text-white'}`}
           >
             API測試
+          </button>
+          <button
+            onClick={() => onChangeView(ViewState.DATABASE_MANAGER)}
+            className={`text-sm flex items-center gap-1 font-medium transition-colors ${currentView === ViewState.DATABASE_MANAGER ? 'text-primary' : 'text-amber-400/80 hover:text-amber-400'}`}
+          >
+            <Icon name="database" className="text-[16px]" />
+            資料管理
           </button>
           <button className="text-sm font-medium text-textMuted hover:text-white transition-colors">
             自選追蹤
@@ -121,6 +129,7 @@ const App = () => {
           />
         )}
         {currentView === ViewState.API_TESTING && <ApiTesting />}
+        {currentView === ViewState.DATABASE_MANAGER && <DatabaseManager onNavigateToStock={navigateToStock} />}
       </main>
 
       <Footer />

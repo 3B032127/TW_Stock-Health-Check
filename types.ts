@@ -203,7 +203,33 @@ export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   STOCK_DETAIL = 'STOCK_DETAIL',
   ECONOMIC_INDICATORS = 'ECONOMIC_INDICATORS',
-  API_TESTING = 'API_TESTING'
+  API_TESTING = 'API_TESTING',
+  DATABASE_MANAGER = 'DATABASE_MANAGER'
+}
+
+export interface DbSummary {
+  fileSizeMb: number;
+  totalStocks: number;
+  totalRecords: number;
+  tableCounts: {
+    financials: number;
+    prices: number;
+    chips: number;
+    dividends: number;
+  };
+}
+
+export interface DbStockStats {
+  id: string;
+  name: string;
+  lastSyncTime: number;
+  dataTypes: Record<string, { lastUpdated: number; lastDataDate: string }>;
+  records: {
+    financials: number;
+    prices: number;
+    chips: number;
+    dividends: number;
+  };
 }
 
 export enum ApiTestingTab {

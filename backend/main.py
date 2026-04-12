@@ -153,9 +153,9 @@ import yfinance as yf
 import asyncio
 from datetime import datetime
 
-async def get_market_cap(sid: str) -> float:
+async def get_market_cap(sid: str, suffix: str = "TW") -> float:
     try:
-        ticker = yf.Ticker(f"{sid}.TW")
+        ticker = yf.Ticker(f"{sid}.{suffix}")
         info = await asyncio.to_thread(lambda: ticker.info)
         price = info.get('previousClose') or info.get('regularMarketPreviousClose')
         shares = info.get('sharesOutstanding')
@@ -218,7 +218,7 @@ async def read_stock_profile(stock_id: str):
                                          and s.get("type") in ("twse", "tpex")]
                         
                         # 並行抓取所有人的市值
-                        mc_tasks = [get_market_cap(p.get("stock_id", "")) for p in industry_peers]
+                        mc_tasks = [get_market_cap(p.get("stock_id", ""), "TW" if p.get("type") == "twse" else "TWO") for p in industry_peers]
                         mc_results = await asyncio.gather(*mc_tasks)
                         
                         valid_peers = []
@@ -434,7 +434,8 @@ async def read_stock_peers(stock_id: str):
                          and s.get("type") in ("twse", "tpex")]
     
     # 4. 取得目標股票的市值 (作為比較基準 - 使用昨日收盤價)
-    target_mc = await get_market_cap(stock_id)
+    target_suffix = "TW" if target_info.get("type") == "twse" else "TWO"
+    target_mc = await get_market_cap(stock_id, target_suffix)
     if target_mc == 0:
         # Fallback to a random value if real market cap fails, but keep it stable for target
         import hashlib
@@ -448,7 +449,7 @@ async def read_stock_peers(stock_id: str):
         candidates = candidates[:30]
     
     # 並行抓取候選人的市值
-    mc_tasks = [get_market_cap(p["stock_id"]) for p in candidates]
+    mc_tasks = [get_market_cap(p["stock_id"], "TW" if p.get("type") == "twse" else "TWO") for p in candidates]
     mc_results = await asyncio.gather(*mc_tasks)
     
     peer_pool = []
@@ -658,7 +659,12 @@ async def read_stock_health_check(
     """獲取個股財報健檢數據"""
     source, hc_data = await finance.calculate_health_check(db, stock_id)
     if not hc_data:
-        raise HTTPException(status_code=404, detail="Health check data not available")
+        return {
+            "status": "no_data",
+            "source": source,
+            "data": None,
+            "message": "此股票尚未同步財務歷史數據，請點擊同步按鈕。"
+        }
 
     try:
         peers_res = await read_stock_peers(stock_id)
@@ -896,3 +902,38 @@ async def read_top_losers(limit: int = Query(default=10, ge=1, le=50)):
         }
     finally:
         await crawler.close()
+
+@app.get('/api/v1/stock/{stock_id}/sync-status')
+async def check_sync_status_endpoint(stock_id: str, db: Session = Depends(get_db)):
+    from .services import sync
+    return sync.get_staleness_status(db, stock_id)
+
+@app.post('/api/v1/stock/{stock_id}/sync')
+async def trigger_explicit_sync(stock_id: str, db: Session = Depends(get_db)):
+    from .services import sync
+    return await sync.execute_explicit_sync(db, stock_id)
+
+@app.get('/api/v1/database/summary')
+async def get_db_summary_api(db: Session = Depends(get_db)):
+    from .services import database_service
+    return database_service.get_db_summary(db)
+
+@app.get('/api/v1/database/stocks')
+async def get_db_stocks_api(db: Session = Depends(get_db)):
+    from .services import database_service
+    stats = database_service.get_all_stocks_stats(db)
+    global stock_list_cache
+    if stock_list_cache:
+        for stat in stats:
+            match = next((s for s in stock_list_cache if s.get("stock_id") == stat["id"]), None)
+            if match:
+                stat["name"] = match.get("stock_name", stat["name"])
+    return stats
+
+@app.delete('/api/v1/database/stocks/{stock_id}')
+async def delete_stock_data_api(stock_id: str, db: Session = Depends(get_db)):
+    from .services import database_service
+    success = database_service.delete_stock_data(db, stock_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete stock data")
+    return {"status": "success"}
