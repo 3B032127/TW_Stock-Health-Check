@@ -37,50 +37,75 @@ export const DetailedMetricCard: React.FC<DetailedMetricCardProps> = ({ type, ca
           <>
             {/* Dupont Analysis */}
             <div className="bg-surfaceLight/10 rounded-xl p-5 border border-surfaceLight border-l-4 border-l-blue-500">
-              <div className="flex justify-between items-end mb-3">
-                <span className="text-sm font-bold text-slate-300">股東權益報酬率 (ROE)</span>
-                <span className="text-2xl font-black text-emerald-400">{advancedData.dupont.roe}%</span>
+              <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 mb-3">
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-300">股東權益報酬率 (ROE)</span>
+                  <span className="text-3xl font-black text-emerald-400">{advancedData.dupont.roe}%</span>
+                </div>
+                
+                {/* Dupont Breakdown */}
+                <div className="flex items-center justify-between xl:justify-start gap-1 bg-surfaceLight/20 p-2.5 rounded-lg border border-surfaceLight/30 w-full xl:w-auto">
+                   <div className="flex flex-col items-center px-2 flex-1 xl:flex-none">
+                     <span className="text-[10px] text-textMuted font-bold mb-0.5">淨利率</span>
+                     <span className="text-sm font-black text-blue-400">{advancedData.dupont.netMargin}%</span>
+                   </div>
+                   <Icon name="close" className="text-[10px] text-textMuted opacity-50" />
+                   <div className="flex flex-col items-center px-2 flex-1 xl:flex-none">
+                     <span className="text-[10px] text-textMuted font-bold mb-0.5">總資產週轉</span>
+                     <span className="text-sm font-black text-amber-400">{advancedData.dupont.assetTurnover}x</span>
+                   </div>
+                   <Icon name="close" className="text-[10px] text-textMuted opacity-50" />
+                   <div className="flex flex-col items-center px-2 flex-1 xl:flex-none">
+                     <span className="text-[10px] text-textMuted font-bold mb-0.5">權益乘數</span>
+                     <span className="text-sm font-black text-rose-400">{advancedData.dupont.equityMultiplier}x</span>
+                   </div>
+                </div>
               </div>
-              <p className="text-xs text-textMuted leading-relaxed">
-                <span className="text-blue-400 font-bold italic">ROE 驅動主因來自：</span> 
-                {advancedData.dupont.netMargin > 15 ? '高淨利率提供底層強大支撐' : '資產周轉率優化帶動獲利循環'}，
-                {advancedData.dupont.equityMultiplier < 1.5 ? '且未使用過度槓桿，獲利品質極佳。' : '輔以適當槓桿擴大股東報酬。'}
-              </p>
+
+              <div className="bg-surfaceLight/20 rounded-lg p-3 mt-2 border border-surfaceLight/10 shadow-inner">
+                <p className="text-[11px] text-textMuted leading-relaxed">
+                  <span className="text-blue-400 font-bold italic flex items-center gap-1 mb-1">
+                    <Icon name="lightbulb" className="text-[12px]" /> ROE 驅動主因分析
+                  </span> 
+                  {advancedData.dupont.netMargin > 15 ? '高淨利率提供底層強大支撐' : '資產周轉率優化帶動獲利循環'}，
+                  {advancedData.dupont.equityMultiplier < 1.5 ? '且未使用過度槓桿，獲利品質極佳。' : '輔以適當槓桿擴大股東報酬，請留意相關負債風險。'}
+                </p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mt-2">
-              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
-                <div className="flex justify-between items-center">
+            <div className="grid grid-cols-2 gap-6 mt-4">
+              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-4">
+                <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-textMuted font-bold">毛利率</span>
                   {advancedData?.peerAvgs?.rawGrossMargin && (
-                    <span className="text-[10px] text-amber-500 font-bold">同業平均: {advancedData?.peerAvgs?.rawGrossMargin}%</span>
+                    <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">同業平均: {advancedData?.peerAvgs?.rawGrossMargin}%</span>
                   )}
                 </div>
-                <span className="text-xl font-black text-white">{categoryData.items[0]?.value || 'N/A'}</span>
-                <div className="relative w-full h-1.5 bg-slate-800 rounded-full">
-                  <div className="h-full bg-blue-500 rounded-full absolute left-0 top-0 bottom-0" style={{ width: categoryData.items[0]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[0].value.replace('%', '')) || 0))}%` : '0%' }}></div>
+                <span className="text-2xl font-black text-white">{categoryData.items[0]?.value || 'N/A'}</span>
+                <div className="relative w-full h-2 bg-slate-800 rounded-full mt-1 border border-black/20 overflow-hidden shadow-inner">
+                  <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full absolute left-0 top-0 bottom-0 transition-all duration-1000" style={{ width: categoryData.items[0]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[0].value.replace('%', '')) || 0))}%` : '0%' }}></div>
                   {advancedData?.peerAvgs?.rawGrossMargin && (
                     <div 
-                      className="absolute top-[-4px] bottom-[-4px] w-[3px] bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.8)] z-10 rounded-full" 
+                      className="absolute top-[-2px] bottom-[-2px] w-[3px] bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,1)] z-10 rounded-full" 
                       style={{ left: `${Math.min(100, Math.max(0, advancedData?.peerAvgs?.rawGrossMargin))}%`, transform: 'translateX(-50%)' }} 
                       title={`同業平均: ${advancedData?.peerAvgs?.rawGrossMargin}%`}
                     ></div>
                   )}
                 </div>
               </div>
-              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-3">
-                <div className="flex justify-between items-center">
+              <div className="flex flex-col gap-2 border-b border-surfaceLight pb-4">
+                <div className="flex justify-between items-center mb-1">
                   <span className="text-xs text-textMuted font-bold">淨利率</span>
                   {advancedData?.peerAvgs?.rawNetMargin && (
-                    <span className="text-[10px] text-amber-500 font-bold">同業平均: {advancedData?.peerAvgs?.rawNetMargin}%</span>
+                    <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">同業平均: {advancedData?.peerAvgs?.rawNetMargin}%</span>
                   )}
                 </div>
-                <span className="text-xl font-black text-white">{categoryData.items[2]?.value || 'N/A'}</span>
-                <div className="relative w-full h-1.5 bg-slate-800 rounded-full">
-                  <div className="h-full bg-blue-500 rounded-full absolute left-0 top-0 bottom-0" style={{ width: categoryData.items[2]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[2].value.replace('%', '')) || 0))}%` : '0%' }}></div>
+                <span className="text-2xl font-black text-white">{categoryData.items[2]?.value || 'N/A'}</span>
+                <div className="relative w-full h-2 bg-slate-800 rounded-full mt-1 border border-black/20 overflow-hidden shadow-inner">
+                  <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full absolute left-0 top-0 bottom-0 transition-all duration-1000" style={{ width: categoryData.items[2]?.value ? `${Math.min(100, Math.max(0, parseFloat(categoryData.items[2].value.replace('%', '')) || 0))}%` : '0%' }}></div>
                   {advancedData?.peerAvgs?.rawNetMargin && (
                     <div 
-                      className="absolute top-[-4px] bottom-[-4px] w-[3px] bg-amber-500 shadow-[0_0_5px_rgba(245,158,11,0.8)] z-10 rounded-full" 
+                      className="absolute top-[-2px] bottom-[-2px] w-[3px] bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,1)] z-10 rounded-full" 
                       style={{ left: `${Math.min(100, Math.max(0, advancedData?.peerAvgs?.rawNetMargin))}%`, transform: 'translateX(-50%)' }} 
                       title={`同業平均: ${advancedData?.peerAvgs?.rawNetMargin}%`}
                     ></div>
