@@ -46,8 +46,35 @@ export const MoatCard: React.FC<MoatCardProps> = ({ items, score, dividendHistor
     payout: Math.min(d.payoutRatio * 100, 150) // Cap visual height for payout
   })) : [];
 
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-surface border border-surfaceLight p-3 rounded-lg shadow-xl flex flex-col gap-1.5 z-50 min-w-[130px]">
+          <span className="text-white font-bold text-[11px] mb-1 border-b border-surfaceLight pb-1.5 flex justify-between">
+            <span className="text-textMuted">年度</span>
+            <span className="text-amber-400">{label}</span>
+          </span>
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex justify-between items-center gap-4 text-[11px]">
+              <div className="flex items-center gap-1.5">
+                 <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.dataKey === 'amount' ? '#10b981' : '#f59e0b' }}></div>
+                 <span className="text-slate-300">
+                   {entry.dataKey === 'amount' ? '現金股利' : '配發率'}
+                 </span>
+              </div>
+              <span className="font-bold text-white tracking-wider">
+                {entry.dataKey === 'amount' ? `$${entry.value}` : `${entry.value.toFixed(0)}%`}
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
-    <div className="rounded-xl bg-surface p-5 shadow-sm border border-surfaceLight flex flex-col h-full relative overflow-hidden">
+    <div className="rounded-xl bg-surface p-6 shadow-sm border border-surfaceLight flex flex-col h-full flex-1 relative overflow-hidden">
       <div className="flex flex-wrap justify-between items-center mb-5 border-b border-surfaceLight/50 pb-3 gap-4">
         <h3 className="text-white text-lg font-bold flex items-center gap-2">
           <Icon name="verified" className="text-amber-400" />
@@ -93,42 +120,38 @@ export const MoatCard: React.FC<MoatCardProps> = ({ items, score, dividendHistor
         </div>
       </div>
 
-      <div className="flex flex-col xl:flex-row gap-6 flex-1">
-        {/* Left: Radar + Checklist */}
-        <div className="flex-1 flex flex-col gap-4 justify-between">
-          
-          {/* Radar Chart Section */}
-          <div className="flex items-center gap-2 h-[140px]">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-1 h-full">
+        {/* 1. Radar Chart & Checklist Section (Left Column) */}
+        <div className="col-span-1 flex flex-col h-full gap-4">
+          <div className="flex-1 min-h-[120px] relative">
              {radarData.length > 0 ? (
-               <div className="w-full h-full relative">
-                 <ResponsiveContainer width="100%" height="100%">
-                   <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarData}>
-                     <PolarGrid stroke="#334155" strokeDasharray="3 3" />
-                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />
-                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                     <Radar name="護城河維度" dataKey="score" stroke="#f59e0b" fill="#fbbf24" fillOpacity={0.3} isAnimationActive={true} animationDuration={1000} />
-                   </RadarChart>
-                 </ResponsiveContainer>
-               </div>
+               <ResponsiveContainer width="100%" height="100%">
+                 <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarData} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+                   <PolarGrid stroke="#334155" strokeDasharray="3 3" />
+                   <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />
+                   <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                   <Radar name="護城河維度" dataKey="score" stroke="#f59e0b" fill="#fbbf24" fillOpacity={0.3} isAnimationActive={true} animationDuration={1000} />
+                 </RadarChart>
+               </ResponsiveContainer>
              ) : (
                 <div className="flex-1 flex items-center justify-center text-textMuted text-xs bg-surfaceLight/10 rounded-lg border border-surfaceLight/30 h-full">尚未計算雷達圖數據</div>
              )}
           </div>
-
-          {/* Checklist */}
-          <div className="flex flex-col gap-2">
+          
+          {/* Checklist moved under Radar */}
+          <div className="flex flex-col gap-1.5 mt-auto">
             {items.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-center px-4 py-2 rounded-lg bg-surfaceLight/5 border border-surfaceLight/20 hover:bg-surfaceLight/20 transition-colors group">
-                <span className="text-xs font-bold text-slate-300 tracking-wide flex items-center gap-2">
+              <div key={idx} className="flex justify-between items-center px-3 py-1.5 rounded-lg bg-surfaceLight/5 border border-surfaceLight/20 hover:bg-surfaceLight/20 transition-colors group">
+                <span className="text-[11px] font-bold text-slate-300 tracking-wide flex items-center gap-2">
                   <div className={`w-1.5 h-1.5 rounded-full transition-transform group-hover:scale-125 ${item.status === 'pass' ? 'bg-amber-400 shadow-[0_0_5px_rgba(251,191,36,0.8)]' : 'bg-slate-600'}`}></div>
                   {item.label.includes('(') ? item.label.split('(')[0].trim() : item.label}
                 </span>
                 {item.status === 'pass' ? (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20">
                     <Icon name="check" className="text-[10px]" /> {item.label.includes('(') ? item.label.split('(')[1].split(')')[0] : '達標'}
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-surfaceLight/50 text-textMuted border border-white/5">
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-surfaceLight/50 text-textMuted border border-white/5">
                     <Icon name="close" className="text-[10px]" /> 待加強
                   </span>
                 )}
@@ -137,53 +160,44 @@ export const MoatCard: React.FC<MoatCardProps> = ({ items, score, dividendHistor
           </div>
         </div>
 
-        {/* Right: Dual Axis Dividend Chart */}
-        <div className="flex-1 flex flex-col pt-2 xl:pt-0 xl:border-l border-t xl:border-t-0 border-surfaceLight/50 xl:pl-6">
+        {/* 2. Dividend Chart (Right Column) */}
+        <div className="col-span-1 flex flex-col h-full border-t md:border-t-0 md:border-l border-surfaceLight/50 pt-4 md:pt-0 md:pl-4">
           <div className="flex justify-between items-end mb-2">
             <div className="flex flex-col gap-1">
               <span className="text-xs text-textMuted font-bold flex items-center gap-1.5">
-                <Icon name="payments" className="text-[14px]" /> 歷史股利與配發率趨勢
+                <Icon name="payments" className="text-[14px]" /> 股利與配發率
               </span>
-              <span className="text-[10px] text-slate-400 italic">長線護城河驗證指標</span>
             </div>
             {chartData.length > 0 && chartData[chartData.length-1].amount > 0 && (
-              <span className="text-xs font-black bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded border border-emerald-500/20">
-                最新現金股利 ${chartData[chartData.length-1].amount}
+              <span className="text-[10px] font-black bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                最新 ${chartData[chartData.length-1].amount}
               </span>
             )}
           </div>
           
           {chartData.length > 0 ? (
-            <div className="flex-1 w-full min-h-[160px] relative mt-2">
+            <div className="flex-1 w-full min-h-[200px] relative mt-1">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
-                  <YAxis yAxisId="left" orientation="left" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
+                <ComposedChart data={chartData} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
+                  <YAxis yAxisId="left" orientation="left" tick={{ fill: '#64748b', fontSize: 9 }} axisLine={false} tickLine={false} />
                   <YAxis yAxisId="right" orientation="right" domain={[0, 150]} hide />
-                  <RechartsTooltip 
-                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                    itemStyle={{ fontSize: 12, fontWeight: 'bold' }}
-                    labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 4 }}
-                    formatter={(value: number, name: string) => {
-                      if (name === 'payout') return [`${value.toFixed(1)}%`, '盈餘配發率'];
-                      return [`$${value.toFixed(2)}`, '配息金額'];
-                    }}
-                  />
-                  <Bar yAxisId="left" dataKey="amount" radius={[4, 4, 0, 0]} barSize={20} isAnimationActive={true}>
+                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
+                  <Bar yAxisId="left" dataKey="amount" radius={[2, 2, 0, 0]} barSize={14} isAnimationActive={true}>
                     {chartData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.amount > 0 ? '#10b981' : '#f43f5e'} />
                     ))}
                   </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey="payout" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3, fill: '#f59e0b', stroke: '#1e293b', strokeWidth: 2 }} isAnimationActive={true} />
+                  <Line yAxisId="right" type="monotone" dataKey="payout" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2, fill: '#f59e0b', stroke: '#1e293b', strokeWidth: 1.5 }} isAnimationActive={true} />
                 </ComposedChart>
               </ResponsiveContainer>
-              <div className="flex justify-between mt-1 px-4 text-[9px] font-mono text-textMuted">
+              <div className="flex justify-between mt-1 px-2 text-[9px] font-mono text-textMuted">
                  {chartData.map(d => <span key={d.name}>{d.name}</span>)}
               </div>
             </div>
           ) : (
-             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs bg-surfaceLight/5 rounded-xl border border-surfaceLight/20 h-full min-h-[160px] gap-2">
-               <Icon name="hide_source" className="text-2xl opacity-50" />
-               尚無股利資料或不配息
+             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs bg-surfaceLight/5 rounded-xl border border-surfaceLight/20 min-h-[200px] gap-2">
+               <Icon name="hide_source" className="text-xl opacity-50" />
+               尚無股利資料
              </div>
           )}
         </div>
