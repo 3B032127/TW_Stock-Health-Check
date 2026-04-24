@@ -101,6 +101,8 @@ export const HealthCheckTab = ({ stockId }: { stockId: string }) => {
                dividendHistory={healthCheckData.advanced.dividendHistory} 
              />
           )}
+
+
         </div>
 
         {/* 右側綜合導航大卡片 (4/12) - 垂直拉長整合 */}
