@@ -81,6 +81,18 @@ class ChipsDaily(Base):
 
     __table_args__ = (UniqueConstraint('stock_id', 'date', name='uix_chips_daily_stock_date'),)
 
+class ShareholdingSpread(Base):
+    __tablename__ = "shareholding_spread"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    stock_id = Column(String, index=True)
+    date = Column(String, index=True)
+    
+    level = Column(Integer)             # 分級 (1~15)
+    proportion = Column(Float)          # 佔總股數比例 (%)
+    
+    __table_args__ = (UniqueConstraint('stock_id', 'date', 'level', name='uix_shareholding_stock_date_level'),)
+
 class StockPriceDaily(Base):
     __tablename__ = "stock_prices_daily"
 
