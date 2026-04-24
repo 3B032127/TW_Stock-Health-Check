@@ -146,7 +146,7 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
       {/* Content Switch */}
       {activeTab === StockTab.PROFILE && <CompanyProfile stockId={stockId} />}
       {activeTab === StockTab.QUOTE && <RealTimeQuote />}
-      {activeTab === StockTab.CHIPS && <ChipsAnalysis />}
+      {activeTab === StockTab.CHIPS && <ChipsAnalysis stockId={stockId} />}
       {activeTab === StockTab.HEALTH_CHECK && <HealthCheckTab stockId={stockId} />}
 
       {activeTab === StockTab.FINANCIALS && (
