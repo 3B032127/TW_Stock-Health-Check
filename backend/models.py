@@ -148,9 +148,18 @@ class SyncMetadata(Base):
     last_data_date = Column(String) # the max date or quarter available in DB
     __table_args__ = (UniqueConstraint('stock_id', 'data_type', name='uix_sync_metadata_stock_type'),)
 
+class ResponseCache(Base):
+    __tablename__ = "response_cache"
+    id = Column(Integer, primary_key=True, index=True)
+    cache_key = Column(String, unique=True, index=True) # e.g. "health_check:2330:2024-04-28"
+    response_data = Column(String) # JSON stringified data
+    created_at = Column(BigInteger) # timestamp
+    expires_at = Column(BigInteger) # timestamp
+
 class MarketCapCache(Base):
     __tablename__ = "market_cap_cache"
-    stock_id = Column(String, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
+    stock_id = Column(String, unique=True, index=True)
     market_cap = Column(Float)
     last_updated = Column(BigInteger)
 
