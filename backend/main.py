@@ -1,8 +1,9 @@
+import asyncio
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from . import models, schemas, database
-from .services import finance, cache_service
+from .services import finance, market, cache_service
 
 # Create DB tables
 models.Base.metadata.create_all(bind=database.engine)
@@ -171,6 +172,7 @@ def is_taiwan_market_open() -> bool:
 
 async def get_market_cap(sid: str, suffix: str = "TW", db: Session = None) -> float:
     import time
+    import asyncio
     cached = None
     market_open = is_taiwan_market_open()
     
@@ -179,13 +181,9 @@ async def get_market_cap(sid: str, suffix: str = "TW", db: Session = None) -> fl
             cached = db.query(models.MarketCapCache).filter_by(stock_id=sid).first()
             if cached:
                 now = int(time.time())
-                # 如果市場沒開，快取效期延長至 3 天 (覆蓋週末)
-                # 如果市場有開，快取效期維持 1 天
                 stale_limit = 86400 if market_open else 259200
                 if now - cached.last_updated < stale_limit:
                     return cached.market_cap
-                
-                # 特殊優化：如果是在非交易時段且已有舊數據，為了速度優先，即使超過 3 天也暫時回傳舊數據
                 if not market_open:
                     return cached.market_cap
         except Exception as e:
@@ -193,8 +191,15 @@ async def get_market_cap(sid: str, suffix: str = "TW", db: Session = None) -> fl
 
     try:
         import yfinance as yf
+        # 使用 wait_for 增加超時保護，避免單一 API 卡死整個請求
         ticker = yf.Ticker(f"{sid}.{suffix}")
-        info = await asyncio.to_thread(lambda: ticker.info)
+        
+        # 嘗試獲取資料，設定 5 秒超時
+        info = await asyncio.wait_for(
+            asyncio.to_thread(lambda: ticker.info),
+            timeout=5.0
+        )
+        
         price = info.get('previousClose') or info.get('regularMarketPreviousClose') or info.get('currentPrice')
         shares = info.get('sharesOutstanding')
         
@@ -218,7 +223,8 @@ async def get_market_cap(sid: str, suffix: str = "TW", db: Session = None) -> fl
                 print(f"Error updating mc_cache for {sid}: {db_err}")
                 
         return mc_value
-    except Exception as e:
+    except Exception:
+        # 靜默處理 yfinance 錯誤，若有舊資料則回傳，否則回傳 0
         if cached: return cached.market_cap
         return 0.0
 
@@ -461,52 +467,63 @@ async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
     from datetime import datetime, timedelta
     import random
     
-    # 1. 確保有 stock_list
-    if stock_list_cache is None:
-        client = FinMindClient()
-        try:
-            data = await client.fetch_stock_info()
-            if data:
-                stock_list_cache = data
-        except Exception as e:
-            print(f"Error fetching stock info list: {e}")
-        finally:
-            await client.close()
-            
-    if not stock_list_cache:
-        return {"status": "error", "message": "股票清單獲取失敗", "data": {"industry": "未知", "peers": []}}
-        
-    # 2. 找到目標股票的產業
-    target_info = next((s for s in stock_list_cache if s.get("stock_id") == stock_id), None)
-    if not target_info:
-        return {"status": "success", "source": "finmind", "data": {"industry": "未知 (或查無此股)", "peers": []}}
+    # 1. 獲取當前股票的產業資訊 (優先從本地資料庫抓取細分產業)
+    target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
     
-    target_industry = target_info.get("industry_category")
-    if not target_industry:
-        return {"status": "success", "source": "finmind", "data": {"industry": "未知", "peers": []}}
+    if target_stock:
+        target_name = target_stock.name
+        target_industry = target_stock.industry
+        target_sub_industry = target_stock.sub_industry
+        target_type = target_stock.market_type
+    else:
+        # Fallback to stock_list_cache if not in DB
+        if not stock_list_cache:
+            client = FinMindClient()
+            try:
+                stock_list_cache = await client.fetch_stock_info()
+            finally:
+                await client.close()
         
-    # 3. 找出同產業的有效股票 (過濾掉非 4 碼的認購權證等)
-    all_industry_peers = [s for s in stock_list_cache 
-                         if s.get("industry_category") == target_industry 
-                         and len(s.get("stock_id", "")) == 4 
-                         and s.get("type") in ("twse", "tpex")]
+        info = next((s for s in stock_list_cache if s.get("stock_id") == stock_id), None)
+        if not info:
+            return {"status": "success", "source": "finmind", "data": {"industry": "未知", "peers": []}}
+        target_name = info.get("stock_name", "未知")
+        target_industry = info.get("industry_category", "未知")
+        target_sub_industry = target_industry
+        target_type = info.get("type", "twse")
+
+    # 2. 獲取同業清單 (優先匹配子產業)
+    sub_peers = db.query(models.Stock).filter(
+        models.Stock.sub_industry == target_sub_industry,
+        models.Stock.stock_id != stock_id
+    ).all()
     
-    # 4. 取得目標股票的市值 (作為比較基準 - 使用昨日收盤價)
-    target_suffix = "TW" if target_info.get("type") == "twse" else "TWO"
+    if len(sub_peers) >= 5:
+        all_industry_peers = [{"stock_id": s.stock_id, "stock_name": s.name, "type": s.market_type} for s in sub_peers]
+        display_industry = target_sub_industry
+    else:
+        # 如果子產業太少，則找大類相同的
+        ind_peers = db.query(models.Stock).filter(
+            models.Stock.industry == target_industry,
+            models.Stock.stock_id != stock_id
+        ).all()
+        all_industry_peers = [{"stock_id": s.stock_id, "stock_name": s.name, "type": s.market_type} for s in ind_peers]
+        display_industry = target_industry
+
+    # 3. 取得目標股票的市值
+    target_suffix = "TW" if target_type == "twse" else "TWO"
     target_mc = await get_market_cap(stock_id, target_suffix, db)
     if target_mc == 0:
-        # Fallback to a random value if real market cap fails, but keep it stable for target
         import hashlib
         target_mc = 500.0 + (int(hashlib.md5(stock_id.encode()).hexdigest(), 16) % 9500)
 
-    # 5. 從產業同業中挑選一些候選人來抓市值 (如果同業太多，挑選前 30 檔，避免效能問題)
-    candidates = [p for p in all_industry_peers if p["stock_id"] != stock_id]
-    if len(candidates) > 30:
-        # 這裡也要維持決定性，不使用 random.sample
-        candidates.sort(key=lambda x: x["stock_id"])
-        candidates = candidates[:30]
+    # 4. 限縮候選數量以提升效能
+    candidates = all_industry_peers
+    if len(candidates) > 15:
+        candidates.sort(key=lambda x: abs(int(x["stock_id"]) - int(stock_id)) if x["stock_id"].isdigit() else 9999)
+        candidates = candidates[:15]
     
-    # 並行抓取候選人的市值
+    # 5. 並行抓取候選人的市值
     mc_tasks = [get_market_cap(p["stock_id"], "TW" if p.get("type") == "twse" else "TWO", db) for p in candidates]
     mc_results = await asyncio.gather(*mc_tasks)
     
@@ -516,11 +533,12 @@ async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
         if mc > 0:
             peer_pool.append({"info": p, "marketCap": mc})
     
-    # 6. 找出市值最接近目標的 10 檔 (決定性排序)
-    # 條件 1: 市值差值絕對值
-    # 條件 2: 股票代號 (Tie-breaker)
+    # 6. 找出市值最接近目標的 4 檔 (總共 5 檔)
     peer_pool.sort(key=lambda x: (abs(x["marketCap"] - target_mc), x["info"]["stock_id"]))
-    selected_peers_info = peer_pool[:10]
+    selected_peers_info = peer_pool[:4]
+    
+    # 建立 target_info 供後續使用
+    target_info = {"stock_id": stock_id, "stock_name": target_name}
     
     # 7. 針對這 10 檔 + Target 抓取財務指標 (PE, PB, Yield)
     client = FinMindClient()
@@ -619,7 +637,7 @@ async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
                 print(f"Error fetching metrics for {peer_id}: {e}")
                 return None
 
-        # 抓取目標 + 選定的 5 個同業
+        # 抓取目標 + 選定的 4 個同業 (總共 5 檔)
         target_metrics_task = fetch_metrics(stock_id, target_mc)
         peers_metrics_tasks = [fetch_metrics(p["info"]["stock_id"], p["marketCap"]) for p in selected_peers_info]
         
@@ -682,7 +700,7 @@ async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
             "status": "success",
             "source": "finmind+real_statement",
             "data": {
-                "industry": target_industry,
+                "industry": display_industry,
                 "peers": final_peers,
                 "industryAverage": industry_average
             }
