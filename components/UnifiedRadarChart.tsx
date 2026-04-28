@@ -14,7 +14,7 @@ interface Props {
 export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, industrySector, hoveredDimension, setHoveredDimension }) => {
     const radarData = useMemo(() => {
         const today = new Date().toISOString().split('T')[0];
-        const cacheKey = `radar_v2_${mainStock.id}_${today}`;
+        const cacheKey = `radar_v3_${mainStock.id}_${today}`;
         
         // 嘗試從 sessionStorage 讀取快取
         const cachedData = sessionStorage.getItem(cacheKey);
@@ -128,8 +128,8 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
                             <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.2}/>
                         </linearGradient>
                         <linearGradient id="radarAvgGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.5}/>
-                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.1}/>
+                            <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.7}/>
+                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.3}/>
                         </linearGradient>
                     </defs>
                     <PolarGrid stroke="#334155" />
