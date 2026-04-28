@@ -175,41 +175,6 @@ export function useIndicatorHistory(indicatorId: string, period: string) {
 
 
 
-// ─── useSectorData ───────────────────────────────────────────────────
-
-export interface SectorData {
-    name: string;
-    value: number;
-    change: number;
-    isUp: boolean;
-}
-
-export function useSectorData() {
-    const query = useQuery({
-        queryKey: ['market', 'sectors'],
-        queryFn: async (): Promise<SectorData[]> => {
-            const apiBase = API_BASE_URL.replace('/v1', '');
-            const response = await fetch(`${apiBase}/market/heatmap`);
-            const result = await response.json();
-            // FinMind wrapper returns {status: "success", data: [...]}
-            // Adjust based on the actual response structure from main.py
-            if (result.status === 'success' && result.data) {
-                return result.data;
-            }
-            return [];
-        },
-        staleTime: getStaleTime(),
-        refetchInterval: getRefetchInterval(),
-    });
-
-    return {
-        sectors: query.data ?? [],
-        isLoading: query.isLoading,
-        isFetching: query.isFetching,
-        dataUpdatedAt: query.dataUpdatedAt,
-        error: query.error as Error | null,
-    };
-}
 
 // ─── useMarketRankings ───────────────────────────────────────────────
 
