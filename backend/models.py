@@ -163,3 +163,12 @@ class MarketCapCache(Base):
     market_cap = Column(Float)
     last_updated = Column(BigInteger)
 
+class Stock(Base):
+    __tablename__ = "stocks"
+    stock_id = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    industry = Column(String, index=True)      # 大類 (如：半導體業)
+    sub_industry = Column(String, index=True)  # 細分 (如：IC 設計)
+    market_type = Column(String)               # twse / tpex / emergent
+    last_updated = Column(BigInteger)
+
