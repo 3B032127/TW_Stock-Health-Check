@@ -604,11 +604,11 @@ async def calculate_health_check(db: Session, stock_id: str):
     # 技術優勢: 基於毛利率與獲利穩定性
     tech_advantage = min(100, int(gross_margin * 1.5)) 
     # 規模經濟: 基於營收規模與市值 (簡化判斷)
-    economies_of_scale = min(100, int(total_score * 0.5 + 40 if latest_is.revenue > 100000000 else total_score * 0.5 + 20))
+    economies_of_scale = min(100, int(total_score * 0.5 + 40 if (latest_is.revenue or 0) > 100000000 else total_score * 0.5 + 20))
     # 營運效率: 杜邦分析中的資產週轉率
     ops_efficiency = min(100, int(asset_turnover * 50 + profit_score * 0.5))
     # 資本壁壘: 淨資產規模
-    capital_barrier = min(100, int(solv_score * 0.6 + (30 if latest_bs.shareholders_equity > 1000000000 else 10)))
+    capital_barrier = min(100, int(solv_score * 0.6 + (30 if (latest_bs.shareholders_equity or 0) > 1000000000 else 10)))
     # 品牌價值: 淨利率與其一致性
     brand_value = min(100, int(net_margin * 2 + 30))
 
