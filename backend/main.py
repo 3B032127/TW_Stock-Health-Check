@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from . import models, schemas, database
-from .services import finance
+from .services import finance, cache_service
 
 # Create DB tables
 models.Base.metadata.create_all(bind=database.engine)
@@ -371,6 +371,7 @@ async def read_news_content(url: str):
 async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
     """獲取個股核心估值指標 (PE, PB, Yield) 與近 30 天走勢"""
     from .services.finmind import FinMindClient
+
     from datetime import datetime, timedelta
     
     client = FinMindClient()
@@ -453,6 +454,7 @@ async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
 async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
     """獲取同業比較資料"""
     global stock_list_cache
+
     from .services.finmind import FinMindClient
     import asyncio
     import yfinance as yf
@@ -731,6 +733,7 @@ async def read_chips(
     db: Session = Depends(get_db)
 ):
     source, items = await market.get_chips_data(db, stock_id, days)
+
     
     # 將 SQLAlchemy 模型轉換為字典，並把資料單位還原成「張」
     history = []
@@ -768,6 +771,7 @@ async def read_stock_health_check(
 ):
     """獲取個股財報健檢數據"""
     source, hc_data = await finance.calculate_health_check(db, stock_id)
+
     if not hc_data:
         return {
             "status": "no_data",
@@ -874,8 +878,13 @@ async def read_economics(
     }
 
 @app.get("/api/v1/market/indicators")
-def read_market_indicators():
+def read_market_indicators(db: Session = Depends(get_db)):
     """Get real-time market indicators that influence Taiwan stock market"""
+    # 嘗試讀取快取
+    cached = cache_service.get_cached_response(db, "market", "indicators")
+    if cached:
+        return cached
+
     from .services.indicators import get_indicators_service
     import os
     
@@ -885,34 +894,41 @@ def read_market_indicators():
     service = get_indicators_service(gemini_key)
     data = service.get_all_indicators()
     
-    return {
+    res = {
         "status": "success",
         "source": "yfinance+gemini",
         "data": data
     }
+    # 存儲快取
+    cache_service.set_cached_response(db, "market", "indicators", res)
+    return res
+
 
 
 @app.get("/api/v1/market/taiex")
-def read_taiex_data(period: str = Query(default="1m", pattern="^(1d|1w|1m|1y)$")):
+def read_taiex_data(period: str = Query(default="1m", pattern="^(1d|1w|1m|1y)$"), db: Session = Depends(get_db)):
     """
     Get detailed TAIEX (Taiwan Weighted Index) data
-    
-    Args:
-        period: Time period - 1d, 1w, 1m, or 1y (default: 1m)
-    
-    Returns:
-        Current TAIEX data and historical data for charting
     """
+    # 嘗試讀取快取
+    cached = cache_service.get_cached_response(db, "market", f"taiex_{period}")
+    if cached:
+        return cached
+
     from .services.indicators import get_indicators_service
     
     service = get_indicators_service()
     data = service.fetch_taiex_data(period)
     
-    return {
+    res = {
         "status": "success",
         "source": "yfinance",
         "data": data
     }
+    # 存儲快取
+    cache_service.set_cached_response(db, "market", f"taiex_{period}", res)
+    return res
+
 
 
 @app.get("/api/v1/market/indicators/{indicator_id}/history")
@@ -943,73 +959,77 @@ def read_indicator_history(
 
 
 @app.get("/api/market/sectors")
-async def get_sector_performance():
+async def get_sector_performance(db: Session = Depends(get_db)):
+    # 嘗試讀取快取
+    cached = cache_service.get_cached_response(db, "market", "sectors")
+    if cached:
+        return cached
+
     from .services.sector_scraper import sector_scraper
-    return sector_scraper.get_sector_performance()
+    res = sector_scraper.get_sector_performance()
+    
+    # 存儲快取
+    cache_service.set_cached_response(db, "market", "sectors", res)
+    return res
 
 
-@app.get("/api/market/heatmap")
-async def get_real_sector_heatmap():
-    from .services.sector_service import sector_service
-    # await the async method directly
-    data = await sector_service.get_sector_heatmap_async()
-    return {
-        "status": "success",
-        "source": "finmind",
-        "data": data
-    }
+
 
 
 @app.get("/api/v1/market/rankings/gainers")
-async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50)):
+async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50), db: Session = Depends(get_db)):
     """
     獲取上市漲幅排行榜
-    
-    Args:
-        limit: 要返回的股票數量（預設10，最多50）
-    
-    Returns:
-        漲幅排行榜股票列表
     """
+    # 嘗試讀取快取
+    cached = cache_service.get_cached_response(db, "market", f"gainers_{limit}")
+    if cached:
+        return cached
+
     from .services.yahoo_crawler import YahooStockCrawler
     
     crawler = YahooStockCrawler()
     try:
         rankings = await crawler.get_top_gainers(limit)
-        return {
+        res = {
             "status": "success",
             "source": "yahoo+finmind",
             "data": {
                 "rankings": rankings
             }
         }
+        # 存儲快取
+        cache_service.set_cached_response(db, "market", f"gainers_{limit}", res)
+        return res
     finally:
         await crawler.close()
 
 
 @app.get("/api/v1/market/rankings/losers")
-async def read_top_losers(limit: int = Query(default=10, ge=1, le=50)):
+async def read_top_losers(limit: int = Query(default=10, ge=1, le=50), db: Session = Depends(get_db)):
     """
     獲取上市跌幅排行榜
-    
-    Args:
-        limit: 要返回的股票數量（預設10，最多50）
-    
-    Returns:
-        跌幅排行榜股票列表
     """
+    # 嘗試讀取快取
+    cached = cache_service.get_cached_response(db, "market", f"losers_{limit}")
+    if cached:
+        return cached
+
     from .services.yahoo_crawler import YahooStockCrawler
     
     crawler = YahooStockCrawler()
     try:
         rankings = await crawler.get_top_losers(limit)
-        return {
+        res = {
             "status": "success",
             "source": "yahoo+finmind",
             "data": {
                 "rankings": rankings
             }
         }
+        # 存儲快取
+        cache_service.set_cached_response(db, "market", f"losers_{limit}", res)
+        return res
     finally:
         await crawler.close()
 
