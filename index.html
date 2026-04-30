@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>台股財報健檢系統</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -14,17 +14,21 @@
           extend: {
             fontFamily: {
               sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
+              mono: ['IBM Plex Mono', 'monospace'],
             },
             colors: {
-              background: '#101622',
-              surface: '#1e293b', // slate-800
-              surfaceLight: '#232f48',
-              primary: '#135bec', // Blue
-              primaryHover: '#2563eb',
-              up: '#ef4444', // Red for Taiwan stocks up
-              down: '#10b981', // Green for Taiwan stocks down
-              textMain: '#ffffff',
-              textMuted: '#94a3b8' // slate-400
+              background: '#0b1120',
+              surface: '#0f172a', 
+              surfaceLight: '#1e293b',
+              primary: '#3b82f6', 
+              primaryHover: '#60a5fa',
+              up: '#ef4444', 
+              down: '#22c55e', 
+              textMain: '#f1f5f9',
+              textMuted: '#94a3b8' 
+            },
+            boxShadow: {
+              'premium': '0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2)',
             }
           }
         }
@@ -32,23 +36,43 @@
     </script>
     <style>
       body {
-        background-color: #101622;
-        color: white;
+        background-color: #0b1120;
+        color: #f1f5f9;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+      }
+      /* Premium Card Style */
+      .card-premium {
+        background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        box-shadow: 0 4px 20px -5px rgba(0, 0, 0, 0.5);
+      }
+      .font-mono-data {
+        font-family: 'IBM Plex Mono', monospace;
+        letter-spacing: -0.02em;
       }
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
       }
       ::-webkit-scrollbar-track {
-        background: #101622;
+        background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: #334155;
-        border-radius: 4px;
+        background: rgba(148, 163, 184, 0.1);
+        border-radius: 10px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #475569;
+        background: rgba(148, 163, 184, 0.2);
+      }
+      /* Red Pulse for Caution */
+      @keyframes redPulse {
+        0% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.6; transform: scale(1.05); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      .animate-pulse-caution {
+        animation: redPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
       }
     </style>
   <script type="importmap">

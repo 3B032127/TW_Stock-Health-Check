@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ViewState } from './types';
 import Dashboard from './pages/Dashboard';
+import TaiwanMarket from './pages/TaiwanMarket';
 import StockDetail from './pages/StockDetail';
 import EconomicIndicators from './pages/EconomicIndicators';
 import ApiTesting from './pages/ApiTesting';
@@ -24,8 +25,8 @@ const Header = ({
   onNavigateToStock: (stockId: string) => void;
 }) => {
   return (
-    <header className="sticky top-0 z-50 border-b border-surfaceLight bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between px-4 py-3 lg:px-6">
+    <header className="sticky top-0 z-50 border-b border-white/5 bg-background/80 backdrop-blur-md">
+      <div className="mx-auto flex w-full max-w-[1440px] items-center justify-between px-6 py-4">
         <div className="flex flex-1 items-center gap-6 lg:gap-10">
           <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => onChangeView(ViewState.DASHBOARD)}>
             <div className="flex size-8 items-center justify-center rounded bg-primary text-white">
@@ -48,6 +49,12 @@ const Header = ({
             className={`text-sm font-medium transition-colors ${currentView === ViewState.DASHBOARD ? 'text-primary' : 'text-textMuted hover:text-white'}`}
           >
             市場概況
+          </button>
+          <button
+            onClick={() => onChangeView(ViewState.TAIWAN_MARKET)}
+            className={`text-sm font-medium transition-colors ${currentView === ViewState.TAIWAN_MARKET ? 'text-primary' : 'text-textMuted hover:text-white'}`}
+          >
+            台股市場
           </button>
           <button
             onClick={() => onChangeView(ViewState.ECONOMIC_INDICATORS)}
@@ -121,7 +128,20 @@ const App = () => {
             onNavigateToIndicator={navigateToIndicator}
           />
         )}
-        {currentView === ViewState.STOCK_DETAIL && <StockDetail key={selectedStockId} stockId={selectedStockId} onNavigateHome={() => setCurrentView(ViewState.DASHBOARD)} onNavigateToStock={navigateToStock} />}
+        {currentView === ViewState.TAIWAN_MARKET && (
+          <TaiwanMarket 
+            onNavigateToStock={navigateToStock}
+          />
+        )}
+        {currentView === ViewState.STOCK_DETAIL && (
+          <StockDetail 
+            key={selectedStockId} 
+            stockId={selectedStockId} 
+            onNavigateHome={() => setCurrentView(ViewState.DASHBOARD)} 
+            onNavigateToMarket={() => setCurrentView(ViewState.TAIWAN_MARKET)}
+            onNavigateToStock={navigateToStock} 
+          />
+        )}
         {currentView === ViewState.ECONOMIC_INDICATORS && (
           <EconomicIndicators
             initialIndicatorId={selectedEconomicIndicatorId}

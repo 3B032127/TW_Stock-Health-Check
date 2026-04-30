@@ -20,7 +20,12 @@ import { useCompanyNews } from '../hooks/useCompanyNews';
 import { useOwnershipData } from '../hooks/useOwnershipData';
 import { usePeerComparison } from '../hooks/usePeerComparison';
 
-const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNavigateToStock?: (id: string) => void }> = ({ stockId = "2330", onNavigateHome, onNavigateToStock }) => {
+const StockDetail: React.FC<{ 
+  stockId: string, 
+  onNavigateHome?: () => void, 
+  onNavigateToMarket?: () => void,
+  onNavigateToStock?: (id: string) => void 
+}> = ({ stockId = "2330", onNavigateHome, onNavigateToMarket, onNavigateToStock }) => {
   const [activeTab, setActiveTab] = useState<StockTab>(StockTab.PROFILE); // Default set to PROFILE
   const [activeSubTab, setActiveSubTab] = useState<FinancialSubTab>(FinancialSubTab.INCOME);
   const { data: profile, isLoading: isProfileLoading } = useCompanyProfile(stockId);
@@ -86,7 +91,7 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
             首頁
           </li>
           <li><Icon name="chevron_right" className="text-xs" /></li>
-          <li className="cursor-pointer hover:text-primary transition-colors" onClick={onNavigateHome}>台股市場</li>
+          <li className="cursor-pointer hover:text-primary transition-colors" onClick={onNavigateToMarket}>台股市場</li>
           <li><Icon name="chevron_right" className="text-xs" /></li>
           <li className="text-white font-bold">{profile ? `${profile.name} (${profile.id})` : `股票代碼 (${stockId})`}</li>
         </ol>
@@ -145,7 +150,7 @@ const StockDetail: React.FC<{ stockId: string, onNavigateHome?: () => void, onNa
 
       {/* Content Switch */}
       {activeTab === StockTab.PROFILE && <CompanyProfile stockId={stockId} />}
-      {activeTab === StockTab.QUOTE && <RealTimeQuote />}
+      {activeTab === StockTab.QUOTE && <RealTimeQuote stockId={stockId} />}
       {activeTab === StockTab.CHIPS && <ChipsAnalysis stockId={stockId} />}
       {activeTab === StockTab.HEALTH_CHECK && <HealthCheckTab stockId={stockId} />}
 

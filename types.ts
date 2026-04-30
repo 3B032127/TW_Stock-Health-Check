@@ -201,6 +201,7 @@ export interface NavItem {
 
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
+  TAIWAN_MARKET = 'TAIWAN_MARKET',
   STOCK_DETAIL = 'STOCK_DETAIL',
   ECONOMIC_INDICATORS = 'ECONOMIC_INDICATORS',
   API_TESTING = 'API_TESTING',
@@ -250,4 +251,40 @@ export enum FinancialSubTab {
   INCOME = 'INCOME',
   BALANCE = 'BALANCE',
   CASH_FLOW = 'CASH_FLOW'
+}
+
+// --- Technical Analysis Types ---
+export interface OHLCV {
+  time: string; // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface IndicatorValue {
+  time: string;
+  value: number;
+}
+
+export interface MACDValue {
+  time: string;
+  macd: number;
+  signal: number;
+  histogram: number;
+}
+
+export interface TechnicalIndicators {
+  sma5: IndicatorValue[];
+  sma20: IndicatorValue[];
+  sma60: IndicatorValue[];
+  ema50: IndicatorValue[];
+  ema200: IndicatorValue[];
+  macd: MACDValue[];
+  rsi: IndicatorValue[];
+  atr: IndicatorValue[];
+  obv: IndicatorValue[];
+  upperBand: IndicatorValue[];
+  lowerBand: IndicatorValue[];
 }

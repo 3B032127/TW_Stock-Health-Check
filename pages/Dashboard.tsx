@@ -85,20 +85,20 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
   return (
     <div
       onClick={onClick}
-      className={`flex flex-col p-5 rounded-xl border border-surfaceLight bg-surface transition-all ${onClick ? 'cursor-pointer hover:border-primary/50 hover:shadow-md' : 'hover:border-slate-600'}`}
+      className={`card-premium flex flex-col p-6 rounded-xl transition-all ${onClick ? 'cursor-pointer hover:translate-y-[-2px] hover:shadow-premium' : ''}`}
     >
       {/* Header with title and mini chart */}
-      <div className="flex items-start justify-between mb-2">
-        <p className="text-textMuted text-sm font-medium flex-1">{title}</p>
+      <div className="flex items-start justify-between mb-4">
+        <p className="text-textMuted text-[10px] font-bold uppercase tracking-widest flex-1">{title}</p>
         <div className="ml-2">
-          <Sparkline data={chartData} color={isUp ? '#ef4444' : '#10b981'} />
+          <Sparkline data={chartData} color={isUp ? '#ef4444' : '#22c55e'} />
         </div>
       </div>
 
       {/* Value and change */}
-      <div className="flex items-end justify-between mb-3">
-        <p className="text-2xl font-bold">{value}</p>
-        <div className={`flex items-center text-sm font-bold ${isUp ? 'text-up' : 'text-down'}`}>
+      <div className="flex items-end justify-between mb-4">
+        <p className="text-2xl font-black text-white font-mono-data tracking-tight">{value}</p>
+        <div className={`flex items-center text-sm font-bold font-mono-data ${isUp ? 'text-up' : 'text-down'}`}>
           <Icon name={isUp ? 'arrow_upward' : 'arrow_downward'} className="text-[16px] mr-0.5" />
           {change}
         </div>
@@ -106,29 +106,16 @@ const IndicatorCard: React.FC<IndicatorCardProps> = ({
 
       {/* Additional metadata */}
       {(description || note || text || isPositiveForMarket !== undefined) && (
-        <div className="pt-3 border-t border-surfaceLight/50 space-y-2">
+        <div className="pt-4 border-t border-white/5 space-y-3">
           {description && (
-            <div className="flex items-start gap-2 text-xs text-textMuted">
-              <span className="text-sm">📊</span>
+            <div className="flex items-start gap-2 text-[11px] text-textMuted leading-relaxed">
               <span className="flex-1">{description}</span>
             </div>
           )}
           {note && (
-            <div className="flex items-start gap-2 text-xs text-primary">
-              <span className="text-sm">💡</span>
+            <div className="flex items-start gap-2 text-[11px] text-primary/80 font-medium">
+              <span className="text-xs">💡</span>
               <span className="flex-1">{note}</span>
-            </div>
-          )}
-          {text && (
-            <div className="flex items-start gap-2 text-xs text-yellow-400 italic">
-              <span className="text-sm">✨</span>
-              <span className="flex-1">{text}</span>
-            </div>
-          )}
-          {isPositiveForMarket !== undefined && (
-            <div className={`flex items-center gap-2 text-xs font-semibold ${isPositiveForMarket ? 'text-up' : 'text-down'}`}>
-              <span className="text-sm">{isPositiveForMarket ? '📈' : '📉'}</span>
-              <span>{isPositiveForMarket ? '利多' : '利空'}</span>
             </div>
           )}
         </div>
@@ -169,22 +156,22 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
   };
 
   return (
-    <div className="flex flex-col rounded-xl border border-surfaceLight bg-surface overflow-hidden">
-      <div className="px-5 py-4 border-b border-surfaceLight flex justify-between items-center">
+    <div className="card-premium flex flex-col rounded-2xl overflow-hidden">
+      <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center">
         <h3 className="font-bold text-lg flex items-center gap-2">
           <Icon name={icon} className={colorClass} />
           {title}
         </h3>
-        <button className="text-sm text-primary font-medium hover:text-white transition-colors">查看更多</button>
+        <button className="text-xs text-primary font-bold hover:text-white transition-colors uppercase tracking-widest">View All</button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-surfaceLight/50 text-xs text-textMuted">
-              <th className="py-3 px-5 font-semibold">個股</th>
-              <th className="py-3 px-5 font-semibold text-right">成交價</th>
-              <th className="py-3 px-5 font-semibold text-right">漲跌幅</th>
-              <th className="py-3 px-5 font-semibold w-24">走勢</th>
+            <tr className="bg-white/2 text-[10px] text-textMuted uppercase tracking-widest font-bold">
+              <th className="py-4 px-8">個股</th>
+              <th className="py-4 px-8 text-right">成交價</th>
+              <th className="py-4 px-8 text-right">漲跌幅</th>
+              <th className="py-4 px-8 w-24">走勢</th>
             </tr>
           </thead>
           <tbody className="text-sm">
@@ -192,26 +179,26 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
               <tr
                 key={stock.id}
                 onClick={() => onNavigate(stock.id)}
-                className="border-b border-surfaceLight hover:bg-surfaceLight/30 transition-colors cursor-pointer last:border-0"
+                className="border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer last:border-0 group"
               >
-                <td className="py-3 px-5">
-                  <p className="font-bold text-white">{stock.name}</p>
-                  <p className="text-xs text-textMuted">{stock.id}</p>
+                <td className="py-5 px-8">
+                  <p className="font-bold text-white group-hover:text-primary transition-colors">{stock.name}</p>
+                  <p className="text-[10px] text-textMuted font-mono-data">{stock.id}</p>
                 </td>
-                <td className="py-3 px-5 text-right font-medium">
+                <td className="py-5 px-8 text-right font-black font-mono-data">
                   <span className={`
-                    ${stock.isLimitUp ? 'bg-up/20 border border-up/40 px-2 py-1 rounded font-bold text-up' : ''}
-                    ${stock.isLimitDown ? 'bg-down/20 border border-down/40 px-2 py-1 rounded font-bold text-down' : ''}
+                    ${stock.isLimitUp ? 'bg-up/20 border border-up/40 px-2 py-1 rounded text-up' : ''}
+                    ${stock.isLimitDown ? 'bg-down/20 border border-down/40 px-2 py-1 rounded text-down' : ''}
                     ${!stock.isLimitUp && !stock.isLimitDown ? 'text-white' : ''}
                   `}>
                     {stock.price.toFixed(2)}
                   </span>
                 </td>
-                <td className={`py-3 px-5 text-right font-bold ${colorClass}`}>
+                <td className={`py-5 px-8 text-right font-black font-mono-data ${colorClass}`}>
                   {isGainer ? '+' : ''}{stock.changePercent.toFixed(2)}%
                 </td>
-                <td className="py-3 px-5">
-                  <Sparkline data={getMockData(stock.id)} color={isGainer ? '#ef4444' : '#10b981'} />
+                <td className="py-5 px-8">
+                  <Sparkline data={getMockData(stock.id)} color={isGainer ? '#ef4444' : '#22c55e'} />
                 </td>
               </tr>
             ))}
