@@ -7,14 +7,31 @@ interface Props {
     mainStock: RawStockData;
     peerPool: RawStockData[];
     industrySector: string;
+    industryAverage?: any;
+    industryRange?: any;
     hoveredDimension?: string | null;
     setHoveredDimension?: (dim: string | null) => void;
 }
 
-export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, industrySector, hoveredDimension, setHoveredDimension }) => {
+export const UnifiedRadarChart: React.FC<Props> = ({ 
+    mainStock, 
+    peerPool, 
+    industrySector, 
+    industryAverage,
+    industryRange,
+    hoveredDimension, 
+    setHoveredDimension 
+}) => {
+    if (!mainStock || !mainStock.id) {
+        return (
+            <div className="flex-none h-80 border-b border-surfaceLight bg-surface/50 flex items-center justify-center">
+                <span className="text-textMuted text-sm italic">等待數據同步中...</span>
+            </div>
+        );
+    }
     const radarData = useMemo(() => {
         const today = new Date().toISOString().split('T')[0];
-        const cacheKey = `radar_v3_${mainStock.id}_${today}`;
+        const cacheKey = `radar_v4_${mainStock.id}_${today}`;
         
         // 嘗試從 sessionStorage 讀取快取
         const cachedData = sessionStorage.getItem(cacheKey);
@@ -26,24 +43,28 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
             }
         }
 
-        // Select the sample pool (closest by market cap)
-        const samplePool = selectPeerSamplePool(mainStock, peerPool, 10);
-        
         // Compute Min-Max scores 20-100 for main stock and benchmark using the unified dynamic engine
-        const { targetScores, benchmarkScores } = calculateRadarScores(mainStock, samplePool, industrySector);
+        // Now passing industryAverage and industryRange for sector-wide precision
+        const { targetScores, benchmarkScores } = calculateRadarScores(
+            mainStock, 
+            peerPool, 
+            industrySector,
+            industryAverage,
+            industryRange
+        );
 
         // Merge them into one data array for Recharts
         const finalData = targetScores.map((ts, index) => ({
             subject: ts.subject,
             mainScore: ts.score,
-            avgScore: benchmarkScores[index].score, // Dynamic Benchmark Score (not always 50)
-            metadata: ts.metadata // Keep metadata on the data object for Tooltip access
+            avgScore: benchmarkScores[index].score,
+            metadata: ts.metadata
         }));
 
         // 寫入快取
         sessionStorage.setItem(cacheKey, JSON.stringify(finalData));
         return finalData;
-    }, [mainStock, peerPool, industrySector]);
+    }, [mainStock, peerPool, industrySector, industryAverage, industryRange]);
 
     // Extract tooltip content so it can be reused for static display
     const renderTooltipContent = (dataPoint: any) => (
@@ -72,7 +93,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
                             底層指標數據
                         </span>
                         <ul className="flex flex-col gap-1">
-                            {dataPoint.metadata.map((meta: { label: string, valueData: string }, i: number) => (
+                            {(dataPoint.metadata || []).map((meta: { label: string, valueData: string }, i: number) => (
                                 <li key={i} className="flex justify-between items-center text-[11px]">
                                     <span className="text-slate-400">{meta.label}</span>
                                     <span className="text-white font-mono">{meta.valueData}</span>
@@ -136,6 +157,7 @@ export const UnifiedRadarChart: React.FC<Props> = ({ mainStock, peerPool, indust
                     <PolarAngleAxis
                         dataKey="subject"
                         tick={(props: any) => {
+                            if (!props || !props.payload || !props.x || !props.y || isNaN(props.x) || isNaN(props.y)) return null;
                             const { payload, x, y, textAnchor } = props;
                             const isHovered = hoveredDimension === payload.value;
                             return (

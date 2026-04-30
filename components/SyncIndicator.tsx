@@ -25,11 +25,9 @@ const SyncIndicator: React.FC<SyncIndicatorProps> = ({ isFetching, lastUpdated, 
     // Formatters
     const formatTimeShort = (timestamp?: number) => {
         if (!timestamp) return '--/-- --:--';
-        const date = new Date(timestamp * 1000); // Expecting unix timestamp in seconds from backend sync.py
-        if (date.getFullYear() < 2000) {
-            // in case it's in ms
-            date.setTime(timestamp);
-        }
+        // Handle both seconds and milliseconds
+        const date = new Date(timestamp > 1e12 ? timestamp : timestamp * 1000);
+        
         const mm = (date.getMonth() + 1).toString().padStart(2, '0');
         const dd = date.getDate().toString().padStart(2, '0');
         const hh = date.getHours().toString().padStart(2, '0');
@@ -39,10 +37,9 @@ const SyncIndicator: React.FC<SyncIndicatorProps> = ({ isFetching, lastUpdated, 
 
     const formatTimeFull = (timestamp?: number) => {
         if (!timestamp) return '';
-        const date = new Date(timestamp * 1000);
-        if (date.getFullYear() < 2000) {
-            date.setTime(timestamp);
-        }
+        // Handle both seconds and milliseconds
+        const date = new Date(timestamp > 1e12 ? timestamp : timestamp * 1000);
+        
         const yyyy = date.getFullYear();
         const mm = (date.getMonth() + 1).toString().padStart(2, '0');
         const dd = date.getDate().toString().padStart(2, '0');

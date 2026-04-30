@@ -7,6 +7,7 @@ export interface PeerComparisonResponse {
     industry: string;
     peers: RawStockData[];
     industryAverage: RawStockData;
+    industryRange: Record<string, { min: number, max: number, median: number }>;
 }
 
 export const usePeerComparison = (stockId: string) => {

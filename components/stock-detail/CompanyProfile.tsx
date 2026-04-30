@@ -32,6 +32,7 @@ const PeerComparisonSection = ({ stockId }: { stockId: string }) => {
       industrySector={data.industry}
       peers={data.peers}
       industryAverage={data.industryAverage}
+      industryRange={data.industryRange}
     />
   );
 };

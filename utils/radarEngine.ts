@@ -33,9 +33,9 @@ export const calculateMinMaxScore = (
     max: number, 
     isReverse: boolean
 ): number => {
-    if (max === min) return 50; // Edge case: all same
-
-    let score: number;
+    if (max === min || isNaN(max) || isNaN(min) || isNaN(value)) return 50; // Edge case: all same or bad data
+    
+    let score = 0;
     if (isReverse) {
         // Negative Indicator (Lower is better: e.g. PE, Debt Ratio)
         score = 20 + ((max - value) / (max - min)) * 80;
@@ -65,9 +65,12 @@ export const calculateMedianValues = (pool: RawStockData[], field: string): numb
 export const calculateRadarScores = (
     mainStock: RawStockData,
     peerPool: RawStockData[],
-    industrySector: string
+    industrySector: string,
+    industryAverage?: any,
+    industryRange?: any
 ): { targetScores: RadarChartScore[], benchmarkScores: RadarChartScore[] } => {
     const mapping = getIndustryMapping(industrySector);
+    // 組合用於計算極值的 Pool：如果有 industryRange 則優先使用範圍
     const fullPool = [mainStock, ...peerPool];
     
     const targetScores: RadarChartScore[] = [];
@@ -101,13 +104,26 @@ export const calculateRadarScores = (
                 }
             }
 
-            const validPool = fullPool.filter(p => typeof p[field as keyof RawStockData] === 'number');
-            const poolValues = validPool.map(p => Number(p[field as keyof RawStockData]));
+            // 取得 Min/Max 範圍 (優先使用傳入的產業全量數據)
+            let min: number = 0;
+            let max: number = 0;
+            let hasValidRange = false;
+
+            if (industryRange && industryRange[field as string]) {
+                min = industryRange[field as string].min;
+                max = industryRange[field as string].max;
+                hasValidRange = true;
+            } else {
+                const validPool = fullPool.filter(p => typeof p[field as keyof RawStockData] === 'number');
+                const poolValues = validPool.map(p => Number(p[field as keyof RawStockData]));
+                if (poolValues.length > 0) {
+                    max = Math.max(...poolValues);
+                    min = Math.min(...poolValues);
+                    hasValidRange = true;
+                }
+            }
             
-            if (poolValues.length > 0) {
-                const max = Math.max(...poolValues);
-                const min = Math.min(...poolValues);
-                
+            if (hasValidRange) {
                 // Target Score
                 const targetValue = mainStock[field as keyof RawStockData];
                 if (typeof targetValue === 'number') {
@@ -115,15 +131,22 @@ export const calculateRadarScores = (
                     metadata.push({ label, valueData: formatMetricValue(field as string, targetValue) });
                 }
 
-                // Benchmark Score (Median of 5 peers)
-                const benchmarkRawValue = calculateMedianValues(peerPool, field as string);
+                // Benchmark Score (同業標竿)
+                let benchmarkRawValue: number = 0;
+                if (industryAverage && typeof industryAverage[field as string] === 'number') {
+                    benchmarkRawValue = industryAverage[field as string];
+                } else {
+                    benchmarkRawValue = calculateMedianValues(peerPool, field as string);
+                }
                 dimBenchmarkScores.push(calculateMinMaxScore(benchmarkRawValue, min, max, config.isReverse));
             }
         });
 
         // Use Average of indices PR for dimension score (or median)
-        // We use average here to smooth out the 20-100 mapping results
-        const getAvg = (arr: number[]) => arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 50;
+        const getAvg = (arr: number[]) => {
+            const valid = arr.filter(n => typeof n === 'number' && !isNaN(n));
+            return valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : 50;
+        };
 
         targetScores.push({ subject: dim, score: getAvg(dimTargetScores), metadata });
         benchmarkScores.push({ subject: dim, score: getAvg(dimBenchmarkScores), metadata: [] });

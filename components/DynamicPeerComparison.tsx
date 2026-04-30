@@ -5,9 +5,20 @@ import { Icon } from '../App';
 import { UnifiedRadarChart } from './UnifiedRadarChart';
 
 // --- Formatters (TWD Formatting) ---
-export const formatTWD = (val: number) => `NT$ ${val.toFixed(2)}`;
-export const formatMarketCap = (val: number) => `${val.toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} 億元`;
-export const formatPercent = (val: number | undefined | null) => typeof val === 'number' ? `${val.toFixed(2)}%` : '-';
+export const formatTWD = (val: number | null | undefined) => {
+    if (val === null || val === undefined || isNaN(Number(val))) return 'NT$ -';
+    return `NT$ ${Number(val).toFixed(2)}`;
+};
+
+export const formatMarketCap = (val: number | null | undefined) => {
+    if (val === null || val === undefined || isNaN(Number(val))) return '- 億元';
+    return `${Number(val).toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} 億元`;
+};
+
+export const formatPercent = (val: number | undefined | null) => {
+    if (val === null || val === undefined || isNaN(Number(val))) return '-';
+    return `${Number(val).toFixed(2)}%`;
+};
 
 // --- Industry Configurations ---
 export interface ColumnConfig {
@@ -21,17 +32,19 @@ interface Props {
     industrySector: string;
     peers: PeerComparisonData[];
     industryAverage: any;
+    industryRange?: any;
     stockId: string;
 }
 
-export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, industryAverage, stockId }) => {
+export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, industryAverage, industryRange, stockId }) => {
     const [hoveredDimension, setHoveredDimension] = useState<string | null>(null);
     const currentStock = peers.find(p => p.id === stockId);
 
-    const maxPe = Math.max(...peers.map(p => p.peRatio || 0));
-    const maxPb = Math.max(...peers.map(p => p.pbRatio || 0));
-    const maxYield = Math.max(...peers.map(p => p.dividendYield || 0));
-    const maxPs = Math.max(...peers.map(p => p.psRatio || 0));
+    const maxPe = Math.max(0, ...peers.map(p => p.peRatio || 0).filter(v => !isNaN(v)));
+    const maxPb = Math.max(0, ...peers.map(p => p.pbRatio || 0).filter(v => !isNaN(v)));
+    const maxYield = Math.max(0, ...peers.map(p => p.dividendYield || 0).filter(v => !isNaN(v)));
+    const maxPs = Math.max(0, ...peers.map(p => p.psRatio || 0).filter(v => !isNaN(v)));
+    const maxMc = Math.max(0, ...peers.map(p => p.marketCap || 0).filter(v => !isNaN(v)));
 
     // 判斷是否需要 Fallback (有任何一家公司 PE < 0 或為 null)
     const requiresFallback = peers.some(p => p.peRatio === null || p.peRatio < 0);
@@ -90,52 +103,66 @@ export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, 
             );
         };
 
-        const renderPB = (val: number) => (
+        const renderPB = (val: number | null | undefined) => (
             <div className="relative group">
-                <div className="absolute inset-y-1.5 right-4 bg-indigo-500/40 rounded-l transition-all duration-500 z-0" style={{ width: maxPb > 0 && val ? `${(val / maxPb) * 90}%` : '0%' }}></div>
-                <div className="relative z-10 font-medium text-white transition-colors">{val.toFixed(2)}</div>
+                <div className="absolute inset-y-1.5 right-4 bg-indigo-500/40 rounded-l transition-all duration-500 z-0" style={{ width: maxPb > 0 && val ? `${(Number(val) / maxPb) * 90}%` : '0%' }}></div>
+                <div className="relative z-10 font-medium text-white transition-colors">
+                    {val !== null && val !== undefined ? Number(val).toFixed(2) : '-'}
+                </div>
             </div>
         );
 
-        const renderYield = (val: number) => {
-            if (!val || val === 0) return <div className="relative z-10 text-white/50">0.00%</div>;
+        const renderYield = (val: number | null | undefined) => {
+            if (val === null || val === undefined || isNaN(Number(val)) || Number(val) === 0) return <div className="relative z-10 text-white/50">0.00%</div>;
+            const numVal = Number(val);
             return (
                 <div className="relative group">
-                    <div className="absolute inset-y-1.5 right-4 bg-amber-500/40 rounded-l transition-all duration-500 z-0" style={{ width: maxYield > 0 && val ? `${(val / maxYield) * 90}%` : '0%' }}></div>
-                    <div className="relative z-10 font-medium text-white transition-colors">{val.toFixed(2)}%</div>
+                    <div className="absolute inset-y-1.5 right-4 bg-amber-500/40 rounded-l transition-all duration-500 z-0" style={{ width: maxYield > 0 && numVal ? `${(numVal / maxYield) * 90}%` : '0%' }}></div>
+                    <div className="relative z-10 font-medium text-white transition-colors">{numVal.toFixed(2)}%</div>
                 </div>
             );
         };
 
         // 疊加基礎欄位
         baseColumns.push(
-            { key: 'price', label: '目前股價', align: 'right', render: (val: number) => <span className="font-medium relative z-10 text-white">{formatTWD(val)}</span> },
-            { key: 'marketCap', label: '市值', align: 'right', render: (val: number) => <span className="font-medium relative z-10 text-white">{formatMarketCap(val)}</span> },
-            { key: 'peRatio', label: '本益比 (P/E)', align: 'right', render: renderPE }
-        );
-
-        // 動態插入股價營收比 (P/S Ratio) Fallback
-        if (requiresFallback) {
-            baseColumns.push({
+            { key: 'price', label: '目前股價', align: 'right', render: (val: any) => <span className="font-medium relative z-10 text-white">{formatTWD(val)}</span> },
+            { key: 'peRatio', label: '本益比 (P/E)', align: 'right', render: renderPE },
+            {
                 key: 'psRatio',
                 label: '股價營收比 (P/S)',
                 align: 'right',
-                render: (val: number | undefined) => {
-                    if (!val) return <div className="relative z-10 text-white/50 font-medium">-</div>;
+                render: (val: number | undefined | null) => {
+                    if (val === null || val === undefined || isNaN(Number(val))) return <div className="relative z-10 text-white/50 font-medium">-</div>;
+                    const numVal = Number(val);
                     return (
                         <div className="relative group">
-                            <div className="absolute inset-y-1.5 right-4 bg-fuchsia-500/40 rounded-l transition-all duration-500 z-0" style={{ width: maxPs > 0 && val ? `${(val / maxPs) * 90}%` : '0%' }}></div>
+                            <div className="absolute inset-y-1.5 right-4 bg-fuchsia-500/40 rounded-l transition-all duration-500 z-0" style={{ width: maxPs > 0 && numVal ? `${(numVal / maxPs) * 90}%` : '0%' }}></div>
                             <div className="relative z-10 text-white font-medium transition-colors">
-                                {val.toFixed(2)}
+                                {numVal.toFixed(2)}
                             </div>
                         </div>
                     );
                 }
-            });
-        }
+            }
+        );
 
         baseColumns.push(
             { key: 'pbRatio', label: '股價淨值比 (P/B)', align: 'right', render: renderPB },
+            {
+                key: 'marketCap',
+                label: '市值',
+                align: 'right',
+                render: (val: any) => {
+                    const numVal = Number(val);
+                    return (
+                        <div className="relative group min-w-[140px]">
+                            <div className="absolute inset-y-1.5 right-4 bg-slate-500/30 rounded-l transition-all duration-500 z-0" style={{ width: maxMc > 0 && numVal ? `${(numVal / maxMc) * 90}%` : '0%' }}></div>
+                            <span className="font-medium relative z-10 text-white">{formatMarketCap(val)}</span>
+                        </div>
+                    );
+                }
+            },
+            { key: 'roe', label: 'ROE', align: 'right', render: createBarRenderer('roe', 'bg-blue-500/40') },
             { key: 'dividendYield', label: '殖利率', align: 'right', render: renderYield }
         );
 
@@ -143,24 +170,15 @@ export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, 
 
         if (isConst) {
             specificColumns = [
-                { key: 'netMargin', label: '淨利率', align: 'right', render: createBarRenderer('netMargin', 'bg-cyan-500/40') },
                 { key: 'projectGrossMargin', label: '建案毛利率', align: 'right', render: createBarRenderer('projectGrossMargin', 'bg-teal-500/40') },
                 { key: 'contractLiabilitiesYoY', label: '合約負債年增', align: 'right', render: createBarRenderer('contractLiabilitiesYoY', 'bg-sky-500/40') },
-                { key: 'inventoryToAssetsRatio', label: '存貨佔總資產', align: 'right', render: createBarRenderer('inventoryToAssetsRatio', 'bg-rose-500/40') },
                 { key: 'debtRatio', label: '負債比', align: 'right', render: createBarRenderer('debtRatio', 'bg-orange-500/40') }
             ];
         } else if (isFin) {
             specificColumns = [
                 { key: 'roa', label: 'ROA', align: 'right', render: createBarRenderer('roa', 'bg-cyan-500/40') },
-                { key: 'roe', label: 'ROE', align: 'right', render: createBarRenderer('roe', 'bg-blue-500/40') },
-                { key: 'netIncomeYoY', label: '淨收益 YoY', align: 'right', render: createBarRenderer('netIncomeYoY', 'bg-emerald-500/40') },
-                { key: 'capitalAdequacyRatio', label: '資本適足率', align: 'right', render: createBarRenderer('capitalAdequacyRatio', 'bg-indigo-500/40') },
-                { key: 'nplRatio', label: '逾放比', align: 'right', render: createBarRenderer('nplRatio', 'bg-rose-500/40') }
+                { key: 'capitalAdequacyRatio', label: '資本適足率', align: 'right', render: createBarRenderer('capitalAdequacyRatio', 'bg-indigo-500/40') }
             ];
-        } else {
-            // 通用/科技業
-            // 經評估，保留最核心的基地欄位即可，不再附加毛利率等過多細項，維持版面極簡
-            specificColumns = [];
         }
 
         return [...baseColumns, ...specificColumns];
@@ -188,6 +206,8 @@ export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, 
                         mainStock={currentStock as any}
                         peerPool={peers as any}
                         industrySector={industrySector}
+                        industryAverage={industryAverage}
+                        industryRange={industryRange}
                         hoveredDimension={hoveredDimension}
                         setHoveredDimension={setHoveredDimension}
                     />
@@ -288,7 +308,7 @@ export const DynamicPeerComparison: React.FC<Props> = ({ industrySector, peers, 
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-surfaceLight text-white">
-                        {peers.map((peer) => (
+                        {peers.slice(0, 5).map((peer) => (
                             <tr key={peer.id} className={`hover:bg-surfaceLight/40 transition-colors relative ${peer.id === stockId ? 'bg-primary/5' : ''}`}>
                                 {columns.map((col) => (
                                     <td
