@@ -172,6 +172,12 @@ export const api = {
         const response = await fetch(`${API_BASE_URL}/market/rankings/losers?limit=${limit}`);
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
+    },
+
+    getIntraday: async (stockId: string) => {
+        const response = await fetch(`${API_BASE_URL}/stock/${stockId}/intraday`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
     }
 };
 

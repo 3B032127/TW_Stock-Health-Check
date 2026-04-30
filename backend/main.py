@@ -377,7 +377,6 @@ async def read_news_content(url: str):
 async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
     """獲取個股核心估值指標 (PE, PB, Yield) 與近 30 天走勢"""
     from .services.finmind import FinMindClient
-
     from datetime import datetime, timedelta
     
     client = FinMindClient()
@@ -393,45 +392,26 @@ async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
         price_data = await client.fetch_price(stock_id, start_date, end_date)
         
         if not per_data or not price_data:
-            # 如果 FinMind 沒有資料，回傳基本格式防止前端崩潰
             return {
                 "status": "success",
                 "source": "empty",
                 "data": {
-                    "price": 0,
-                    "peRatio": 0,
-                    "pbRatio": 0,
-                    "dividendYield": 0,
-                    "sparklineData": []
+                    "price": 0, "peRatio": 0, "pbRatio": 0, "dividendYield": 0,
+                    "sparklineData": [], "peSparkline": [], "pbSparkline": [], "yieldSparkline": []
                 }
             }
             
         latest_per = per_data[-1]
         latest_price = price_data[-1]
         
-        # 組合走勢圖資料 (取近 1 年/250 筆 以展現具意義的估值河流圖趨勢)
+        # 組合走勢圖資料
         recent_prices = price_data[-250:] if len(price_data) > 250 else price_data
         recent_per = per_data[-250:] if len(per_data) > 250 else per_data
 
-        sparkline_data = [
-            {"time": d.get("date", ""), "value": d.get("close", 0)}
-            for d in recent_prices
-        ]
-        
-        pe_sparkline = [
-            {"time": d.get("date", ""), "value": d.get("PER", 0)}
-            for d in recent_per if "PER" in d
-        ]
-        
-        pb_sparkline = [
-            {"time": d.get("date", ""), "value": d.get("PBR", 0)}
-            for d in recent_per if "PBR" in d
-        ]
-        
-        yield_sparkline = [
-            {"time": d.get("date", ""), "value": d.get("dividend_yield", 0)}
-            for d in recent_per if "dividend_yield" in d
-        ]
+        sparkline_data = [{"time": d.get("date", ""), "value": d.get("close", 0)} for d in recent_prices]
+        pe_sparkline = [{"time": d.get("date", ""), "value": d.get("PER", 0)} for d in recent_per if "PER" in d]
+        pb_sparkline = [{"time": d.get("date", ""), "value": d.get("PBR", 0)} for d in recent_per if "PBR" in d]
+        yield_sparkline = [{"time": d.get("date", ""), "value": d.get("dividend_yield", 0)} for d in recent_per if "dividend_yield" in d]
         
         valuation = {
             "price": latest_price.get("close", 0),
@@ -458,255 +438,181 @@ async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/stock/{stock_id}/peers")
 async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
-    """獲取同業比較資料"""
-    global stock_list_cache
-
-    from .services.finmind import FinMindClient
+    """獲取同業比較資料，使用資料庫全量數據運算"""
     import asyncio
-    import yfinance as yf
-    from datetime import datetime, timedelta
-    import random
-    
-    # 1. 獲取當前股票的產業資訊 (優先從本地資料庫抓取細分產業)
-    target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
-    
-    if target_stock:
-        target_name = target_stock.name
-        target_industry = target_stock.industry
-        target_sub_industry = target_stock.sub_industry
-        target_type = target_stock.market_type
-    else:
-        # Fallback to stock_list_cache if not in DB
-        if not stock_list_cache:
-            client = FinMindClient()
-            try:
-                stock_list_cache = await client.fetch_stock_info()
-            finally:
-                await client.close()
-        
-        info = next((s for s in stock_list_cache if s.get("stock_id") == stock_id), None)
-        if not info:
-            return {"status": "success", "source": "finmind", "data": {"industry": "未知", "peers": []}}
-        target_name = info.get("stock_name", "未知")
-        target_industry = info.get("industry_category", "未知")
-        target_sub_industry = target_industry
-        target_type = info.get("type", "twse")
+    from datetime import datetime
+    import statistics
 
-    # 2. 獲取同業清單 (優先匹配子產業)
-    sub_peers = db.query(models.Stock).filter(
-        models.Stock.sub_industry == target_sub_industry,
-        models.Stock.stock_id != stock_id
+    # 1. 獲取當前股票的產業資訊
+    target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+    if not target_stock:
+        return {"status": "error", "message": "Stock not found in DB. Please sync first."}
+    
+    target_industry = target_stock.industry
+    target_sub_industry = target_stock.sub_industry
+
+    # 2. 獲取同業清單
+    industry_peers_db = db.query(models.Stock).filter(
+        models.Stock.industry == target_industry
     ).all()
     
-    if len(sub_peers) >= 5:
-        all_industry_peers = [{"stock_id": s.stock_id, "stock_name": s.name, "type": s.market_type} for s in sub_peers]
-        display_industry = target_sub_industry
-    else:
-        # 如果子產業太少，則找大類相同的
-        ind_peers = db.query(models.Stock).filter(
-            models.Stock.industry == target_industry,
-            models.Stock.stock_id != stock_id
-        ).all()
-        all_industry_peers = [{"stock_id": s.stock_id, "stock_name": s.name, "type": s.market_type} for s in ind_peers]
-        display_industry = target_industry
+    if not industry_peers_db:
+        return {"status": "success", "data": {"industry": target_industry, "peers": []}}
 
-    # 3. 取得目標股票的市值
-    target_suffix = "TW" if target_type == "twse" else "TWO"
-    target_mc = await get_market_cap(stock_id, target_suffix, db)
-    if target_mc == 0:
-        import hashlib
-        target_mc = 500.0 + (int(hashlib.md5(stock_id.encode()).hexdigest(), 16) % 9500)
-
-    # 4. 限縮候選數量以提升效能
-    candidates = all_industry_peers
-    if len(candidates) > 15:
-        candidates.sort(key=lambda x: abs(int(x["stock_id"]) - int(stock_id)) if x["stock_id"].isdigit() else 9999)
-        candidates = candidates[:15]
+    all_peer_ids = [s.stock_id for s in industry_peers_db]
     
-    # 5. 並行抓取候選人的市值
-    mc_tasks = [get_market_cap(p["stock_id"], "TW" if p.get("type") == "twse" else "TWO", db) for p in candidates]
-    mc_results = await asyncio.gather(*mc_tasks)
+    # 3. 批量抓取財務數據
+    from sqlalchemy import func
     
-    peer_pool = []
-    for i, p in enumerate(candidates):
-        mc = mc_results[i]
-        if mc > 0:
-            peer_pool.append({"info": p, "marketCap": mc})
+    latest_q_sub = db.query(
+        models.FinancialStatement.stock_id,
+        func.max(models.FinancialStatement.year * 10 + models.FinancialStatement.quarter).label('latest_q')
+    ).filter(models.FinancialStatement.stock_id.in_(all_peer_ids)).group_by(models.FinancialStatement.stock_id).subquery()
+
+    latest_statements = db.query(models.FinancialStatement).join(
+        latest_q_sub, 
+        (models.FinancialStatement.stock_id == latest_q_sub.c.stock_id) & 
+        ((models.FinancialStatement.year * 10 + models.FinancialStatement.quarter) == latest_q_sub.c.latest_q)
+    ).all()
+
+    latest_bs_sub = db.query(
+        models.BalanceSheet.stock_id,
+        func.max(models.BalanceSheet.year * 10 + models.BalanceSheet.quarter).label('latest_q')
+    ).filter(models.BalanceSheet.stock_id.in_(all_peer_ids)).group_by(models.BalanceSheet.stock_id).subquery()
+
+    latest_balances = db.query(models.BalanceSheet).join(
+        latest_bs_sub,
+        (models.BalanceSheet.stock_id == latest_bs_sub.c.stock_id) &
+        ((models.BalanceSheet.year * 10 + models.BalanceSheet.quarter) == latest_bs_sub.c.latest_q)
+    ).all()
+
+    # Fetch market cap and latest prices
+    mc_data = {m.stock_id: m.market_cap for m in db.query(models.MarketCapCache).filter(models.MarketCapCache.stock_id.in_(all_peer_ids)).all()}
     
-    # 6. 找出市值最接近目標的 4 檔 (總共 5 檔)
-    peer_pool.sort(key=lambda x: (abs(x["marketCap"] - target_mc), x["info"]["stock_id"]))
-    selected_peers_info = peer_pool[:4]
+    # Fetch latest price for each peer
+    latest_prices_sub = db.query(
+        models.StockPriceDaily.stock_id,
+        func.max(models.StockPriceDaily.date).label('max_date')
+    ).filter(models.StockPriceDaily.stock_id.in_(all_peer_ids)).group_by(models.StockPriceDaily.stock_id).subquery()
+
+    latest_prices = db.query(models.StockPriceDaily).join(
+        latest_prices_sub,
+        (models.StockPriceDaily.stock_id == latest_prices_sub.c.stock_id) &
+        (models.StockPriceDaily.date == latest_prices_sub.c.max_date)
+    ).all()
+    price_map = {p.stock_id: p.close for p in latest_prices}
+
+    # Fetch latest dividend for each peer
+    latest_divs_sub = db.query(
+        models.Dividend.stock_id,
+        func.max(models.Dividend.date).label('max_date')
+    ).filter(models.Dividend.stock_id.in_(all_peer_ids)).group_by(models.Dividend.stock_id).subquery()
+
+    latest_divs = db.query(models.Dividend).join(
+        latest_divs_sub,
+        (models.Dividend.stock_id == latest_divs_sub.c.stock_id) &
+        (models.Dividend.date == latest_divs_sub.c.max_date)
+    ).all()
+    div_map = {d.stock_id: d.cash for d in latest_divs}
     
-    # 建立 target_info 供後續使用
-    target_info = {"stock_id": stock_id, "stock_name": target_name}
+    stmt_map = {s.stock_id: s for s in latest_statements}
+    bal_map = {b.stock_id: b for b in latest_balances}
     
-    # 7. 針對這 10 檔 + Target 抓取財務指標 (PE, PB, Yield)
-    client = FinMindClient()
-    try:
-        end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+    calculated_pool = []
+    for s in industry_peers_db:
+        sid = s.stock_id
+        stmt = stmt_map.get(sid)
+        bal = bal_map.get(sid)
+        mc = mc_data.get(sid, 0)
         
-        async def fetch_metrics(peer_id, mc):
-            try:
-                # 1. 抓取基本估值與股價 (FinMind)
-                tasks = [
-                    client.fetch_per(peer_id, start_date, end_date),
-                    client.fetch_price(peer_id, start_date, end_date),
-                    finance.get_income_statement_history(db, peer_id, limit=8),
-                    finance.get_balance_sheet_history(db, peer_id, limit=4)
-                ]
-                results = await asyncio.gather(*tasks)
-                
-                per_data = results[0]
-                price_data = results[1]
-                _, is_history = results[2]
-                _, bs_history = results[3]
-                
-                latest_price = price_data[-1].get("close", 0) if price_data else 0
-                latest_per = 0
-                latest_pbr = 0
-                latest_yield = 0
-                
-                if per_data:
-                    for d in reversed(per_data):
-                        if d.get("PER", 0) > 0 and latest_per == 0: latest_per = d.get("PER", 0)
-                        if d.get("PBR", 0) > 0 and latest_pbr == 0: latest_pbr = d.get("PBR", 0)
-                        if d.get("dividend_yield", 0) > 0 and latest_yield == 0: latest_yield = d.get("dividend_yield", 0)
-                        if latest_per and latest_pbr and latest_yield: break
-                    
-                    if latest_per == 0 and per_data: latest_per = per_data[-1].get("PER", 0)
-                    if latest_pbr == 0 and per_data: latest_pbr = per_data[-1].get("PBR", 0)
-                    if latest_yield == 0 and per_data: latest_yield = per_data[-1].get("dividend_yield", 0)
-                
-                # 2. 計算真實財務指標
-                real_metrics = {
-                    "grossMargin": None,
-                    "netMargin": None,
-                    "operatingMargin": None,
-                    "roe": None,
-                    "revenueYoY": None,
-                    "epsYoY": None,
-                    "currentRatio": None,
-                    "debtRatio": None,
-                    "roa": None
-                }
-                
-                if is_history:
-                    latest_is = is_history[0]
-                    # 獲利能力
-                    if latest_is.revenue and latest_is.revenue > 0:
-                        if latest_is.gross_profit is not None:
-                            real_metrics["grossMargin"] = round((latest_is.gross_profit / latest_is.revenue) * 100, 2)
-                        if latest_is.net_income is not None:
-                            real_metrics["netMargin"] = round((latest_is.net_income / latest_is.revenue) * 100, 2)
-                        if latest_is.operating_income is not None:
-                            real_metrics["operatingMargin"] = round((latest_is.operating_income / latest_is.revenue) * 100, 2)
-                    
-                    # 成長性 (YoY)
-                    prev_is = next((i for i in is_history if i.year == latest_is.year - 1 and i.quarter == latest_is.quarter), None)
-                    if prev_is:
-                        if prev_is.revenue and prev_is.revenue > 0:
-                            real_metrics["revenueYoY"] = round(((latest_is.revenue - prev_is.revenue) / prev_is.revenue) * 100, 2)
-                        if prev_is.eps and prev_is.eps > 0:
-                            real_metrics["epsYoY"] = round(((latest_is.eps - prev_is.eps) / prev_is.eps) * 100, 2)
-                
-                if bs_history and is_history:
-                    latest_bs = bs_history[0]
-                    # 安全性
-                    if latest_bs.current_liabilities and latest_bs.current_liabilities > 0:
-                        real_metrics["currentRatio"] = round(latest_bs.current_assets / latest_bs.current_liabilities, 2)
-                    if latest_bs.total_assets and latest_bs.total_assets > 0:
-                        real_metrics["debtRatio"] = round((latest_bs.total_liabilities / latest_bs.total_assets) * 100, 2)
-                    
-                    # ROE / ROA
-                    if latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0:
-                        real_metrics["roe"] = round((is_history[0].net_income * 4 / latest_bs.shareholders_equity) * 100, 2)
-                    if latest_bs.total_assets and latest_bs.total_assets > 0:
-                        real_metrics["roa"] = round((is_history[0].net_income * 4 / latest_bs.total_assets) * 100, 2)
+        if not stmt or not bal: continue
 
-                return {
-                    "id": peer_id,
-                    "price": latest_price,
-                    "peRatio": latest_per if latest_per > 0 else None,
-                    "pbRatio": latest_pbr,
-                    "dividendYield": latest_yield,
-                    "marketCap": mc,
-                    **real_metrics
-                }
-            except Exception as e:
-                print(f"Error fetching metrics for {peer_id}: {e}")
-                return None
-
-        # 抓取目標 + 選定的 4 個同業 (總共 5 檔)
-        target_metrics_task = fetch_metrics(stock_id, target_mc)
-        peers_metrics_tasks = [fetch_metrics(p["info"]["stock_id"], p["marketCap"]) for p in selected_peers_info]
+        # Calculate TTM approximations (Latest Quarter * 4)
+        annualized_net_income = (stmt.net_income * 4) if stmt.net_income else 0
+        annualized_revenue = (stmt.revenue * 4) if stmt.revenue else 0
         
-        metrics_results = await asyncio.gather(target_metrics_task, *peers_metrics_tasks)
+        # Estimate price from market cap if possible (marketCap is in 億元)
+        # We don't have sharesOutstanding here, so we'll leave price as a separate fetch if needed.
+        # However, we can use the mc and stmt to get ratios.
         
-        peer_data_list = []
-        for i, res in enumerate(metrics_results):
-            if not res: continue
-            
-            p_info = target_info if i == 0 else selected_peers_info[i-1]["info"]
-            peer_item = {
-                **res,
-                "name": p_info.get("stock_name", "未知")
-            }
-            
-            # 輔助指標 (如果沒有，設為 0 以免前端崩潰，但主要雷達圖指標應為真實)
-            defaults = {
-                'operatingMargin': None,
-                'revenueYoY': None,
-                'epsYoY': None,
-                'currentRatio': None,
-                'institutionalOwnership': None # 此項目前無真實來源
-            }
-            for k, v in defaults.items():
-                if k not in peer_item: peer_item[k] = v
-            
-            peer_data_list.append(peer_item)
+        # Calculate dividend yield
+        price = price_map.get(sid)
+        cash_div = div_map.get(sid, 0)
+        calculated_yield = round((cash_div / price * 100), 2) if price and price > 0 and cash_div else 0
 
-        # 8. 排序：Target 置頂，其餘按市值降序
-        target_row = next((p for p in peer_data_list if p["id"] == stock_id), None)
-        other_rows = [p for p in peer_data_list if p["id"] != stock_id]
-        other_rows.sort(key=lambda x: x["marketCap"], reverse=True)
-        
-        final_peers = ([target_row] if target_row else []) + other_rows
-
-        # 9. 計算產業均值 (基於這 6 檔)
-        def get_avg(key):
-            vals = [p[key] for p in final_peers if key in p and p[key] is not None]
-            return round(sum(vals) / len(vals), 2) if vals else None
-
-        # 收集所有出現過的指標名稱
-        all_metric_keys = set()
-        for p in final_peers:
-            all_metric_keys.update(p.keys())
-        
-        # 排除非數值指標
-        exclude_keys = {'id', 'name', 'price'}
-        metric_keys = [k for k in all_metric_keys if k not in exclude_keys]
-
-        industry_average = {
-            "id": "AVG", 
-            "name": "產業均值"
+        metrics = {
+            "id": sid,
+            "name": s.name,
+            "price": price,
+            "marketCap": mc,
+            "industry": s.industry,
+            "sub_industry": s.sub_industry,
+            "grossMargin": round((stmt.gross_profit / stmt.revenue * 100), 2) if stmt.gross_profit and stmt.revenue else 0,
+            "netMargin": round((stmt.net_income / stmt.revenue * 100), 2) if stmt.net_income and stmt.revenue else 0,
+            "operatingMargin": round((stmt.operating_income / stmt.revenue * 100), 2) if stmt.operating_income and stmt.revenue else 0,
+            "roe": round((stmt.net_income * 4 / bal.shareholders_equity * 100), 2) if stmt.net_income and bal.shareholders_equity else 0,
+            "roa": round((stmt.net_income * 4 / bal.total_assets * 100), 2) if stmt.net_income and bal.total_assets else 0,
+            "currentRatio": round(bal.current_assets / bal.current_liabilities, 2) if bal.current_assets and bal.current_liabilities else 0,
+            "debtRatio": round((bal.total_liabilities / bal.total_assets * 100), 2) if bal.total_liabilities and bal.total_assets else 0,
+            "revenueYoY": 0,
+            "epsYoY": 0,
+            "peRatio": round(mc / (annualized_net_income / 100000000), 2) if mc > 0 and annualized_net_income > 0 else None,
+            "psRatio": round(mc / (annualized_revenue / 100000000), 2) if mc > 0 and annualized_revenue > 0 else None,
+            "pbRatio": round(mc * 100000000 / bal.shareholders_equity, 2) if mc > 0 and bal.shareholders_equity else None,
+            "dividendYield": calculated_yield
         }
-        for k in metric_keys:
-            avg_val = get_avg(k)
-            if avg_val is not None:
-                industry_average[k] = avg_val
+        calculated_pool.append(metrics)
 
+    if not calculated_pool:
         return {
             "status": "success",
-            "source": "finmind+real_statement",
             "data": {
-                "industry": display_industry,
-                "peers": final_peers,
-                "industryAverage": industry_average
+                "industry": target_sub_industry if target_sub_industry else target_industry,
+                "peers": [],
+                "industryAverage": {"id": "AVG", "name": "產業均值"},
+                "industryRange": {}
             }
         }
-    finally:
-        await client.close()
+
+    fields_to_calc = ["grossMargin", "netMargin", "operatingMargin", "roe", "roa", "currentRatio", "debtRatio", "pbRatio"]
+    industry_average = {"id": "AVG", "name": "產業均值"}
+    industry_range = {}
+
+    for field in fields_to_calc:
+        vals = [p[field] for p in calculated_pool if p.get(field) is not None]
+        if vals:
+            med = statistics.median(vals)
+            industry_average[field] = round(med, 2)
+            industry_range[field] = {"min": min(vals), "max": max(vals), "median": med}
+        else:
+            industry_average[field] = 0
+            industry_range[field] = {"min": 0, "max": 0, "median": 0}
+
+    target_mc = mc_data.get(stock_id, 0)
+    calculated_pool.sort(key=lambda x: (
+        0 if x["sub_industry"] == target_sub_industry else 1,
+        abs(x["marketCap"] - target_mc)
+    ))
+    
+    selected_peers = []
+    target_in_pool = next((p for p in calculated_pool if p["id"] == stock_id), None)
+    if target_in_pool:
+        selected_peers.append(target_in_pool)
+    
+    for p in calculated_pool:
+        if p["id"] != stock_id and len(selected_peers) < 10:
+            selected_peers.append(p)
+
+    return {
+        "status": "success",
+        "source": "database_bulk_calculation",
+        "data": {
+            "industry": target_sub_industry if target_sub_industry else target_industry,
+            "peers": selected_peers,
+            "industryAverage": industry_average,
+            "industryRange": industry_range
+        }
+    }
 
 
 @app.get("/api/v1/stock/{stock_id}/revenue-mix")
@@ -866,10 +772,23 @@ async def read_price(
     db: Session = Depends(get_db)
 ):
     source, items = await market.get_stock_price(db, stock_id, days)
+    
+    # Serialize ORM objects to dicts
+    history = [
+        {
+            "date": i.date,
+            "open": float(i.open) if i.open is not None else 0.0,
+            "high": float(i.high) if i.high is not None else 0.0,
+            "low": float(i.low) if i.low is not None else 0.0,
+            "close": float(i.close) if i.close is not None else 0.0,
+            "volume": float(i.volume) if i.volume is not None else 0.0
+        } for i in items
+    ] if items else []
+
     return {
         "status": "success",
         "source": source,
-        "data": {"history": items}
+        "data": {"history": history}
     }
 
 @app.get("/api/v1/stock/dividend", response_model=schemas.ApiResponse)
@@ -878,10 +797,21 @@ async def read_dividend(
     db: Session = Depends(get_db)
 ):
     source, items = await market.get_dividend_data(db, stock_id)
+    
+    history = [
+        {
+            "year": i.year,
+            "date": i.date,
+            "cash": float(i.cash) if i.cash is not None else 0.0,
+            "stock": float(i.stock) if i.stock is not None else 0.0,
+            "total": float(i.total) if i.total is not None else 0.0
+        } for i in items
+    ] if items else []
+
     return {
         "status": "success",
         "source": source,
-        "data": {"history": items}
+        "data": {"history": history}
     }
 
 @app.get("/api/v1/market/economics", response_model=schemas.ApiResponse)
@@ -1085,3 +1015,52 @@ async def delete_stock_data_api(stock_id: str, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete stock data")
     return {"status": "success"}
+
+@app.get("/api/v1/stock/{stock_id}/intraday")
+async def read_stock_intraday(stock_id: str):
+    """獲取當日即時分時資料 (1分鐘頻率)"""
+    import yfinance as yf
+    import pandas as pd
+    from datetime import datetime
+    
+    try:
+        # 嘗試 .TW 或 .TWO
+        ticker_symbol = f"{stock_id}.TW"
+        ticker = yf.Ticker(ticker_symbol)
+        
+        # 抓取最近 1 天的 1 分鐘資料
+        df = await asyncio.to_thread(lambda: ticker.history(period="1d", interval="1m"))
+        
+        if df.empty:
+            ticker_symbol = f"{stock_id}.TWO"
+            ticker = yf.Ticker(ticker_symbol)
+            df = await asyncio.to_thread(lambda: ticker.history(period="1d", interval="1m"))
+            
+        if df.empty:
+            return {
+                "status": "success",
+                "source": "empty",
+                "data": []
+            }
+            
+        # 轉換資料格式供前端使用
+        intraday_data = []
+        for index, row in df.iterrows():
+            intraday_data.append({
+                "time": index.strftime("%H:%M"),
+                "value": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"])
+            })
+            
+        return {
+            "status": "success",
+            "source": "yfinance_intraday",
+            "data": intraday_data
+        }
+    except Exception as e:
+        print(f"Error fetching intraday for {stock_id}: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "data": []
+        }
