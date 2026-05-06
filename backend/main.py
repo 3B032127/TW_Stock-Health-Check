@@ -1016,51 +1016,93 @@ async def delete_stock_data_api(stock_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to delete stock data")
     return {"status": "success"}
 
+@app.get("/api/v1/stock/{stock_id}/quote")
+async def read_stock_quote(stock_id: str):
+    from .services.shioaji_service import shioaji_client
+    import asyncio
+    
+    # Try Shioaji first
+    quote = await asyncio.to_thread(lambda: shioaji_client.get_quote(stock_id))
+    if quote:
+        return {"status": "success", "source": "shioaji", "data": quote}
+        
+    # Fallback to yfinance if Shioaji is not available
+    import yfinance as yf
+    try:
+        ticker = yf.Ticker(f"{stock_id}.TW")
+        info = await asyncio.to_thread(lambda: ticker.info)
+        if "previousClose" not in info:
+            ticker = yf.Ticker(f"{stock_id}.TWO")
+            info = await asyncio.to_thread(lambda: ticker.info)
+            
+        close_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose", 0)
+        prev_close = info.get("previousClose", close_price)
+        change = close_price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close else 0
+        
+        quote_data = {
+            "stock_id": stock_id,
+            "name": info.get("shortName", stock_id),
+            "open": info.get("regularMarketOpen", 0),
+            "high": info.get("dayHigh", 0),
+            "low": info.get("dayLow", 0),
+            "close": close_price,
+            "volume": info.get("regularMarketVolume", 0),
+            "amount": info.get("regularMarketVolume", 0) * close_price,
+            "yesterday_close": prev_close,
+            "change": round(change, 2),
+            "change_percent": round(change_pct, 2)
+        }
+        return {"status": "success", "source": "yfinance_fallback", "data": quote_data}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": None}
+
 @app.get("/api/v1/stock/{stock_id}/intraday")
-async def read_stock_intraday(stock_id: str):
-    """獲取當日即時分時資料 (1分鐘頻率)"""
+async def read_stock_intraday(
+    stock_id: str,
+    range: str = Query("1D", description="Time range: 1D, 5D, 1M, etc.")
+):
+    """獲取分時或多日走勢資料"""
+    import asyncio
+    
+    if range == "1D":
+        from .services.shioaji_service import shioaji_client
+        ticks = await asyncio.to_thread(lambda: shioaji_client.get_ticks(stock_id))
+        if ticks:
+            return {"status": "success", "source": "shioaji_ticks", "data": ticks}
+            
+    # Fallback / Multi-day
     import yfinance as yf
     import pandas as pd
     from datetime import datetime
     
     try:
-        # 嘗試 .TW 或 .TWO
         ticker_symbol = f"{stock_id}.TW"
         ticker = yf.Ticker(ticker_symbol)
         
-        # 抓取最近 1 天的 1 分鐘資料
-        df = await asyncio.to_thread(lambda: ticker.history(period="1d", interval="1m"))
+        period = "1d" if range == "1D" else "5d" if range == "5D" else "1mo"
+        interval = "1m" if range == "1D" else "5m" if range == "5D" else "1d"
+        
+        df = await asyncio.to_thread(lambda: ticker.history(period=period, interval=interval))
         
         if df.empty:
             ticker_symbol = f"{stock_id}.TWO"
             ticker = yf.Ticker(ticker_symbol)
-            df = await asyncio.to_thread(lambda: ticker.history(period="1d", interval="1m"))
+            df = await asyncio.to_thread(lambda: ticker.history(period=period, interval=interval))
             
         if df.empty:
-            return {
-                "status": "success",
-                "source": "empty",
-                "data": []
-            }
+            return {"status": "success", "source": "empty", "data": []}
             
-        # 轉換資料格式供前端使用
         intraday_data = []
         for index, row in df.iterrows():
+            fmt = "%H:%M" if range in ["1D", "5D"] else "%Y-%m-%d"
             intraday_data.append({
-                "time": index.strftime("%H:%M"),
+                "time": index.strftime(fmt),
                 "value": round(float(row["Close"]), 2),
                 "volume": int(row["Volume"])
             })
             
-        return {
-            "status": "success",
-            "source": "yfinance_intraday",
-            "data": intraday_data
-        }
+        return {"status": "success", "source": "yfinance_intraday", "data": intraday_data}
     except Exception as e:
         print(f"Error fetching intraday for {stock_id}: {e}")
-        return {
-            "status": "error",
-            "message": str(e),
-            "data": []
-        }
+        return {"status": "error", "message": str(e), "data": []}
