@@ -7,16 +7,19 @@ export interface IntradayPoint {
   volume: number;
 }
 
-export const useIntraday = (stockId: string) => {
+export const useIntraday = (stockId: string, range: string = '1D') => {
     return useQuery({
-        queryKey: ['intraday', stockId],
+        queryKey: ['intraday', stockId, range],
         queryFn: async () => {
             if (!stockId) return [];
-            const response = await api.getIntraday(stockId) as ApiResponse<IntradayPoint[]>;
-            return response.data;
+            // Direct fetch to handle query parameter since api.ts might not have it yet
+            const response = await fetch(`http://localhost:8000/api/v1/stock/${stockId}/intraday?range=${range}`);
+            const data = await response.json() as ApiResponse<IntradayPoint[]>;
+            return data.data || [];
         },
         enabled: !!stockId,
-        refetchInterval: 60 * 1000, // Refetch every minute
-        staleTime: 30 * 1000,
+        refetchInterval: range === '1D' ? 30 * 1000 : false, // Only refetch if it's today
+        staleTime: range === '1D' ? 30 * 1000 : Infinity,
     });
 };
+
