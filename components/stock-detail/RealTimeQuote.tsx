@@ -5,6 +5,7 @@ import { useTechnicalAnalysis } from '../../hooks/useTechnicalAnalysis';
 import { KLineChart } from './technical/KLineChart';
 import { IndicatorSection, IndicatorType } from './technical/IndicatorSection';
 import { TradingSystemPanel } from './technical/TradingSystemPanel';
+import { TechnicalAnalysisReport } from './technical/TechnicalAnalysisReport';
 import { useIntraday } from '../../hooks/useIntraday';
 import { useQuote } from '../../hooks/useQuote';
 import { STOCK_INTRADAY_DATA, ORDER_BOOK_DATA } from '../../constants'; // Fallback
@@ -56,9 +57,8 @@ export const RealTimeQuote: React.FC<RealTimeQuoteProps> = ({ stockId }) => {
   }, [dataMax, dataMin, referenceValue]);
 
   // Order Book Binding
-  // Quote API can be extended to return orderbook, but for now we fallback or simulate
-  // We'll just use ORDER_BOOK_DATA for now until Shioaji Order Book endpoint is added to useQuote
-  const orderBook = ORDER_BOOK_DATA;
+  // Use real order book from Shioaji quote API, fallback to mock data if not available
+  const orderBook = quote?.order_book || ORDER_BOOK_DATA;
 
   const renderQuoteHeader = () => (
     <div className="bg-surface border border-surfaceLight rounded-xl p-6 mb-6">
@@ -211,7 +211,7 @@ export const RealTimeQuote: React.FC<RealTimeQuoteProps> = ({ stockId }) => {
                       {/* Price Axis */}
                       <YAxis 
                         yAxisId="price"
-                        domain={['dataMin - 10', 'dataMax + 10']} 
+                        domain={['dataMin - 1', 'dataMax + 1']} 
                         axisLine={false} 
                         tickLine={false} 
                         orientation="left"
@@ -230,34 +230,20 @@ export const RealTimeQuote: React.FC<RealTimeQuoteProps> = ({ stockId }) => {
                           );
                         }}
                       />
-                      {/* Volume Axis (hidden) */}
                       <YAxis yAxisId="volume" orientation="right" hide domain={[0, 'dataMax * 3']} />
-                      
                       <RechartsTooltip
                         contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff', borderRadius: '8px' }}
                         itemStyle={{ color: '#fff' }}
                         labelStyle={{ color: '#94a3b8' }}
                       />
-                      
                       <ReferenceLine yAxisId="price" y={referenceValue} stroke="#fff" strokeDasharray="3 3" />
-                      
-                      {/* Volume Bars */}
                       <Bar yAxisId="volume" dataKey="volume" fill="#0ea5e9" opacity={0.6} />
-                      
-                      {/* Price Area */}
-                      <Area 
-                        yAxisId="price"
-                        type="monotone" 
-                        dataKey="value" 
-                        stroke="url(#splitColor)" 
-                        strokeWidth={2} 
-                        fill="url(#splitArea)" 
-                      />
+                      <Area yAxisId="price" type="monotone" dataKey="value" stroke="url(#splitColor)" strokeWidth={2} fill="url(#splitArea)" />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
              ) : (
-                <>
+                <div className="flex flex-col h-full">
                   {taLoading && (
                      <div className="absolute inset-0 flex items-center justify-center bg-surface/50 z-10 flex-col gap-2">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -272,9 +258,7 @@ export const RealTimeQuote: React.FC<RealTimeQuoteProps> = ({ stockId }) => {
                     </div>
                   )}
                   {taData && taData.ohlcv && taData.ohlcv.length > 0 ? (
-                    <div className="flex flex-col h-full">
-                       <KLineChart ohlcv={taData.ohlcv} indicators={taData.indicators} showMA={showMA} showBB={showBB} />
-                    </div>
+                    <KLineChart ohlcv={taData.ohlcv} indicators={taData.indicators} showMA={showMA} showBB={showBB} />
                   ) : (!taLoading && !taError && (
                      <div className="absolute inset-0 flex items-center justify-center bg-surface/50 z-10 flex-col gap-4">
                         <Icon name="history_toggle_off" className="text-textMuted text-5xl opacity-30" />
@@ -282,63 +266,82 @@ export const RealTimeQuote: React.FC<RealTimeQuoteProps> = ({ stockId }) => {
                         <p className="text-textMuted text-sm max-w-xs text-center">該股票可能剛上市或尚未進行數據同步，請點擊上方「同步資料」按鈕。</p>
                      </div>
                   ))}
-                </>
+                </div>
              )}
           </div>
-          
-
         </div>
 
         {/* Right Column (Auxiliary) */}
         <div className="xl:col-span-1 flex flex-col gap-6">
-          {/* Order Book */}
-          <div className="bg-surface border border-surfaceLight rounded-xl overflow-hidden">
-            <div className="p-4 border-b border-surfaceLight bg-surfaceLight/30 flex justify-between">
-              <h3 className="font-bold text-white flex items-center gap-2">
-                <Icon name="list_alt" className="text-primary" />
-                五檔報價
-              </h3>
-              <span className="text-xs text-textMuted flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> 即時
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <div className="flex flex-col-reverse">
-                {orderBook.asks.map((ask, i) => (
-                  <div key={i} className="grid grid-cols-3 text-sm py-2 px-4 hover:bg-surfaceLight/20 relative">
-                    <span className="text-textMuted font-medium text-center">賣 {5 - i}</span>
-                    <span className="text-up font-bold text-right">{ask.price}</span>
-                    <div className="text-right relative z-10">{ask.volume}</div>
-                    <div className="absolute top-1 bottom-1 right-0 bg-up/20 z-0" style={{ width: `${(ask.volume / 500) * 100}%` }}></div>
+          {chartMode === 'INTRADAY' ? (
+            <>
+              {/* Order Book - Only in Intraday */}
+              <div className="bg-surface border border-surfaceLight rounded-xl overflow-hidden shadow-xl animate-fade-in">
+                <div className="p-4 border-b border-surfaceLight bg-surfaceLight/30 flex justify-between">
+                  <h3 className="font-bold text-white flex items-center gap-2">
+                    <Icon name="list_alt" className="text-primary" />
+                    五檔報價
+                  </h3>
+                  <span className="text-xs text-textMuted flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> 即時
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <div className="flex flex-col-reverse">
+                    {orderBook.asks.map((ask, i) => (
+                      <div key={i} className="grid grid-cols-3 text-sm py-2 px-4 hover:bg-surfaceLight/20 relative">
+                        <span className="text-textMuted font-medium text-center">賣 {5 - i}</span>
+                        <span className="text-up font-bold text-right">{ask.price}</span>
+                        <div className="text-right relative z-10">{ask.volume}</div>
+                        <div className="absolute top-1 bottom-1 right-0 bg-up/20 z-0" style={{ width: `${(ask.volume / 500) * 100}%` }}></div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className="border-y border-surfaceLight py-2 bg-surfaceLight/10 text-center text-xs text-textMuted font-medium tracking-wider flex justify-center gap-4">
-                <span>最新 <span className={isUp ? 'text-up' : 'text-down'}>{currentPrice.toFixed(2)}</span></span>
-                <span>單量 <span className="text-yellow-400">{quote?.volume || 0}</span></span>
-              </div>
-              <div className="flex flex-col">
-                {orderBook.bids.map((bid, i) => (
-                  <div key={i} className="grid grid-cols-3 text-sm py-2 px-4 hover:bg-surfaceLight/20 relative">
-                    <span className="text-textMuted font-medium text-center">買 {i + 1}</span>
-                    <span className="text-down font-bold text-right">{bid.price}</span>
-                    <div className="text-right relative z-10">{bid.volume}</div>
-                    <div className="absolute top-1 bottom-1 right-0 bg-down/20 z-0" style={{ width: `${(bid.volume / 500) * 100}%` }}></div>
+                  <div className="border-y border-surfaceLight py-2 bg-surfaceLight/10 text-center text-xs text-textMuted font-medium tracking-wider flex justify-center gap-4">
+                    <span>最新 <span className={isUp ? 'text-up' : 'text-down'}>{currentPrice.toFixed(2)}</span></span>
+                    <span>單量 <span className="text-yellow-400">{quote?.volume || 0}</span></span>
                   </div>
-                ))}
+                  <div className="flex flex-col">
+                    {orderBook.bids.map((bid, i) => (
+                      <div key={i} className="grid grid-cols-3 text-sm py-2 px-4 hover:bg-surfaceLight/20 relative">
+                        <span className="text-textMuted font-medium text-center">買 {i + 1}</span>
+                        <span className="text-down font-bold text-right">{bid.price}</span>
+                        <div className="text-right relative z-10">{bid.volume}</div>
+                        <div className="absolute top-1 bottom-1 right-0 bg-down/20 z-0" style={{ width: `${(bid.volume / 500) * 100}%` }}></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          {/* Strategy Panel */}
-          {taData && taData.ohlcv && taData.ohlcv.length > 0 ? (
-             <TradingSystemPanel ohlcv={taData.ohlcv} indicators={taData.indicators} />
+              {/* Strategy Panels - Only in Intraday */}
+              {taData && taData.ohlcv && taData.ohlcv.length > 0 ? (
+                <div className="animate-fade-in">
+                  <TradingSystemPanel ohlcv={taData.ohlcv} indicators={taData.indicators} />
+                </div>
+              ) : (
+                <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[250px]">
+                  <Icon name="psychology" className="text-textMuted text-5xl opacity-30" />
+                  <span className="text-textMuted font-bold text-lg">交易系統計算中</span>
+                  <span className="text-textMuted/60 text-sm">正在同步大週期技術指標...</span>
+                </div>
+              )}
+            </>
           ) : (
-             <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[250px]">
-               <Icon name="psychology" className="text-textMuted text-5xl opacity-30" />
-               <span className="text-textMuted font-bold text-lg">實戰交易系統載入中</span>
-               <span className="text-textMuted/60 text-sm">需要技術分析數據來計算交易訊號</span>
-             </div>
+            <>
+              {/* Technical Analysis Report - Only in K-Line */}
+              {taData && taData.ohlcv && taData.ohlcv.length > 0 ? (
+                <div className="animate-fade-in">
+                  <TechnicalAnalysisReport ohlcv={taData.ohlcv} indicators={taData.indicators} />
+                </div>
+              ) : (
+                <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[400px]">
+                  <Icon name="analytics" className="text-textMuted text-5xl opacity-30" />
+                  <span className="text-textMuted font-bold text-lg">分析報告生成中</span>
+                  <span className="text-textMuted/60 text-sm">正在診斷所有指標趨勢...</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
