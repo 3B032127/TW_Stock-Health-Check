@@ -4,6 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from . import models, schemas, database
 from .services import finance, market, cache_service
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from the root .env.local file
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env.local')
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+else:
+    load_dotenv() # Fallback to default .env
 
 # Create DB tables
 models.Base.metadata.create_all(bind=database.engine)
@@ -1093,13 +1102,16 @@ async def read_stock_intraday(
         if df.empty:
             return {"status": "success", "source": "empty", "data": []}
             
+        # Drop rows where Close is NaN to prevent JSON serialization errors
+        df = df.dropna(subset=['Close'])
+            
         intraday_data = []
         for index, row in df.iterrows():
             fmt = "%H:%M" if range in ["1D", "5D"] else "%Y-%m-%d"
             intraday_data.append({
                 "time": index.strftime(fmt),
                 "value": round(float(row["Close"]), 2),
-                "volume": int(row["Volume"])
+                "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0
             })
             
         return {"status": "success", "source": "yfinance_intraday", "data": intraday_data}

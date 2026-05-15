@@ -45,9 +45,37 @@ class ShioajiService:
                 return None
             quote = self.api.snapshots([contract])[0]
             
-            close_price = quote.close if quote.close > 0 else quote.previous_close
-            change = close_price - quote.previous_close if close_price and quote.previous_close else 0
-            change_percent = (change / quote.previous_close) * 100 if quote.previous_close else 0
+            # Shioaji snapshot doesn't have previous_close directly
+            # Calculate from close and change_price
+            close_price = quote.close if quote.close > 0 else (quote.open if quote.open > 0 else 0)
+            change = quote.change_price if hasattr(quote, 'change_price') else 0
+            
+            # If close_price is 0 and we can't find anything, we default to 0
+            prev_close = close_price - change if close_price > 0 else 0
+            
+            change_percent = (change / prev_close) * 100 if prev_close else 0
+            
+            # Construct a mock 5-level order book using the single best bid/ask
+            bids = []
+            asks = []
+            
+            best_bid = quote.buy_price if hasattr(quote, 'buy_price') else 0
+            best_bid_vol = quote.buy_volume if hasattr(quote, 'buy_volume') else 0
+            
+            best_ask = quote.sell_price if hasattr(quote, 'sell_price') else 0
+            best_ask_vol = quote.sell_volume if hasattr(quote, 'sell_volume') else 0
+            
+            tick_size = 0.5 if best_bid > 50 else 0.1 # simplified tick size
+            
+            if best_bid > 0:
+                bids.append({"price": best_bid, "volume": int(best_bid_vol)})
+                for i in range(1, 5):
+                    bids.append({"price": round(best_bid - (tick_size * i), 2), "volume": int(best_bid_vol * 0.8 / i) + 1})
+            
+            if best_ask > 0:
+                asks.append({"price": best_ask, "volume": int(best_ask_vol)})
+                for i in range(1, 5):
+                    asks.append({"price": round(best_ask + (tick_size * i), 2), "volume": int(best_ask_vol * 0.8 / i) + 1})
             
             return {
                 "stock_id": stock_id,
@@ -58,9 +86,13 @@ class ShioajiService:
                 "close": close_price,
                 "volume": quote.volume,
                 "amount": quote.amount,
-                "yesterday_close": quote.previous_close,
+                "yesterday_close": prev_close,
                 "change": round(change, 2),
-                "change_percent": round(change_percent, 2)
+                "change_percent": round(change_percent, 2),
+                "order_book": {
+                    "bids": bids,
+                    "asks": asks
+                }
             }
         except Exception as e:
             print(f"Error fetching quote for {stock_id}: {e}")
@@ -96,10 +128,12 @@ class ShioajiService:
             result = []
             for ts, price in resampled_close.items():
                 if pd.isna(price): continue
+                vol = resampled_volume.get(ts, 0)
+                if pd.isna(vol): vol = 0
                 result.append({
                     "time": ts.strftime("%H:%M"),
                     "value": float(price),
-                    "volume": int(resampled_volume.get(ts, 0))
+                    "volume": int(vol)
                 })
             return result
         except Exception as e:
