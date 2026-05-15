@@ -275,6 +275,12 @@ export interface MACDValue {
   histogram: number;
 }
 
+export interface StochasticValue {
+  time: string;
+  k: number;
+  d: number;
+}
+
 export interface TechnicalIndicators {
   sma5: IndicatorValue[];
   sma20: IndicatorValue[];
@@ -282,6 +288,7 @@ export interface TechnicalIndicators {
   ema50: IndicatorValue[];
   ema200: IndicatorValue[];
   macd: MACDValue[];
+  kd: StochasticValue[];
   rsi: IndicatorValue[];
   atr: IndicatorValue[];
   obv: IndicatorValue[];

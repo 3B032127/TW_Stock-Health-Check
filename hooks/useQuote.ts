@@ -13,6 +13,10 @@ export interface QuoteData {
   yesterday_close: number;
   change: number;
   change_percent: number;
+  order_book?: {
+    bids: { price: number; volume: number }[];
+    asks: { price: number; volume: number }[];
+  };
 }
 
 export const useQuote = (stockId: string) => {

@@ -9,6 +9,7 @@ import {
   RSI,
   ATR,
   OBV,
+  Stochastic
 } from 'technicalindicators';
 
 interface TechnicalData {
@@ -121,6 +122,14 @@ export function useTechnicalAnalysis(stockId: string, days: number = 365) {
         const atr = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
         const obv = OBV.calculate({ close: closes, volume: volumes });
 
+        const kdRes = Stochastic.calculate({
+            high: highs,
+            low: lows,
+            close: closes,
+            period: 9,
+            signalPeriod: 3
+        });
+
         const indicators: TechnicalIndicators = {
           sma5: sma5.length > 0 ? mapIndicator(sma5, closes.length - sma5.length) : [],
           sma20: sma20.length > 0 ? mapIndicator(sma20, closes.length - sma20.length) : [],
@@ -142,6 +151,14 @@ export function useTechnicalAnalysis(stockId: string, days: number = 365) {
               macd: val.MACD || 0,
               signal: val.signal || 0,
               histogram: val.histogram || 0
+             };
+          }) : [],
+          kd: kdRes.length > 0 ? kdRes.map((val, i) => {
+             const idx = i + closes.length - kdRes.length;
+             return {
+              time: ohlcv[idx]?.time || ohlcv[ohlcv.length-1].time,
+              k: val.k || 0,
+              d: val.d || 0
              };
           }) : [],
           rsi: rsi.length > 0 ? mapIndicator(rsi, closes.length - rsi.length) : [],
@@ -176,6 +193,6 @@ export function useTechnicalAnalysis(stockId: string, days: number = 365) {
 function getEmptyIndicators(): TechnicalIndicators {
     return {
         sma5: [], sma20: [], sma60: [], ema50: [], ema200: [],
-        macd: [], rsi: [], atr: [], obv: [], upperBand: [], lowerBand: []
+        macd: [], kd: [], rsi: [], atr: [], obv: [], upperBand: [], lowerBand: []
     }
 }
