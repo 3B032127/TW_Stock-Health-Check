@@ -223,7 +223,11 @@ export interface DbSummary {
 export interface DbStockStats {
   id: string;
   name: string;
+  stock_name?: string;
   lastSyncTime: number;
+  price?: number;
+  marketCap?: number;
+  health_score?: number;
   dataTypes: Record<string, { lastUpdated: number; lastDataDate: string }>;
   records: {
     financials: number;

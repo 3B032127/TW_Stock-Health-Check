@@ -45,6 +45,67 @@ def get_db_summary(db: Session) -> dict:
         }
     }
 
+def calculate_db_health_score(db: Session, stock_id: str) -> int:
+    """Calculates a quick fundamental-based health score from database tables."""
+    # Fetch historical financial data
+    is_history = db.query(models.FinancialStatement).filter_by(stock_id=stock_id)\
+                   .order_by(models.FinancialStatement.year.desc(), models.FinancialStatement.quarter.desc()).all()
+    bs_history = db.query(models.BalanceSheet).filter_by(stock_id=stock_id)\
+                   .order_by(models.BalanceSheet.year.desc(), models.BalanceSheet.quarter.desc()).all()
+    cf_history = db.query(models.CashFlowStatement).filter_by(stock_id=stock_id)\
+                   .order_by(models.CashFlowStatement.year.desc(), models.CashFlowStatement.quarter.desc()).all()
+                   
+    if not is_history or not bs_history or not cf_history:
+        return None
+        
+    latest_is = is_history[0]
+    latest_bs = bs_history[0]
+    latest_cf = cf_history[0]
+    
+    # --- Profitability ---
+    gross_margin = (latest_is.gross_profit / latest_is.revenue * 100) if latest_is.gross_profit is not None and latest_is.revenue and latest_is.revenue > 0 else 0.0
+    net_margin = (latest_is.net_income / latest_is.revenue * 100) if latest_is.net_income is not None and latest_is.revenue and latest_is.revenue > 0 else 0.0
+    roe = (latest_is.net_income * 4 / latest_bs.shareholders_equity * 100) if latest_is.net_income is not None and latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0 else 0.0
+    
+    profit_items = [
+        {"status": "pass" if gross_margin > 30 else "neutral" if gross_margin > 15 else "fail"},
+        {"status": "pass" if roe > 10 else "neutral" if roe > 5 else "fail"},
+        {"status": "pass" if net_margin > 15 else "neutral" if net_margin > 5 else "fail"}
+    ]
+    profit_score = sum([100 if i["status"] == "pass" else 60 if i["status"] == "neutral" else 20 for i in profit_items]) // 3
+    
+    # --- Solvency ---
+    curr_ratio = (latest_bs.current_assets / latest_bs.current_liabilities) if latest_bs.current_assets is not None and latest_bs.current_liabilities and latest_bs.current_liabilities > 0 else 1.0
+    debt_eq_ratio = (latest_bs.total_liabilities / latest_bs.shareholders_equity) if latest_bs.total_liabilities is not None and latest_bs.shareholders_equity and latest_bs.shareholders_equity > 0 else 1.0
+    quick_assets = (latest_bs.current_assets - (latest_bs.inventories or 0)) if latest_bs.current_assets is not None else 0.0
+    quick_ratio = (quick_assets / latest_bs.current_liabilities) if latest_bs.current_liabilities and latest_bs.current_liabilities > 0 else 1.0
+    
+    solv_items = [
+        {"status": "pass" if curr_ratio > 1.5 else "neutral" if curr_ratio > 1 else "fail"},
+        {"status": "pass" if debt_eq_ratio < 1.0 else "neutral" if debt_eq_ratio < 1.5 else "fail"},
+        {"status": "pass" if quick_ratio > 1.0 else "neutral" if quick_ratio > 0.8 else "fail"}
+    ]
+    solv_score = sum([100 if i["status"] == "pass" else 60 if i["status"] == "neutral" else 20 for i in solv_items]) // 3
+    
+    # --- Growth ---
+    prev_is = next((i for i in is_history if i.year == latest_is.year - 1 and i.quarter == latest_is.quarter), None)
+    if not prev_is and len(is_history) > 1:
+        prev_is = is_history[-1]
+        
+    rev_yoy = ((latest_is.revenue - prev_is.revenue) / prev_is.revenue * 100) if prev_is and prev_is.revenue and prev_is.revenue > 0 and latest_is.revenue is not None else 0.0
+    eps_yoy = ((latest_is.eps - prev_is.eps) / prev_is.eps * 100) if prev_is and prev_is.eps and prev_is.eps > 0 and latest_is.eps is not None else 0.0
+    fcf = latest_cf.free_cash_flow if latest_cf.free_cash_flow is not None else 0.0
+    
+    growth_items = [
+        {"status": "pass" if rev_yoy > 0 else "neutral" if rev_yoy > -5 else "fail"},
+        {"status": "pass" if eps_yoy > 0 else "neutral" if eps_yoy > -5 else "fail"},
+        {"status": "pass" if fcf > 0 else "fail"}
+    ]
+    growth_score = sum([100 if i["status"] == "pass" else 60 if i["status"] == "neutral" else 20 for i in growth_items]) // 3
+    
+    health_score = (profit_score + solv_score + growth_score) // 3
+    return health_score
+
 def get_all_stocks_stats(db: Session) -> list:
     """Gets sync statistics and record counts per stock."""
     # First get all unique stocks that have metadata
@@ -86,6 +147,25 @@ def get_all_stocks_stats(db: Session) -> list:
     all_stock_ids.update(chips_counts.keys())
     all_stock_ids.update(dividend_counts.keys())
     
+    # Batch fetch market caps and latest prices to prevent N+1 query overhead
+    mc_caches = db.query(models.MarketCapCache).all()
+    mc_map = {m.stock_id: m.market_cap for m in mc_caches}
+    mc_update_map = {m.stock_id: m.last_updated for m in mc_caches}
+    
+    # Get the latest daily price for each stock
+    latest_price_sub = db.query(
+        models.StockPriceDaily.stock_id,
+        func.max(models.StockPriceDaily.date).label('max_date')
+    ).group_by(models.StockPriceDaily.stock_id).subquery()
+    
+    latest_prices = db.query(models.StockPriceDaily).join(
+        latest_price_sub,
+        (models.StockPriceDaily.stock_id == latest_price_sub.c.stock_id) &
+        (models.StockPriceDaily.date == latest_price_sub.c.max_date)
+    ).all()
+    
+    price_map = {p.stock_id: p.close for p in latest_prices}
+
     results = []
     for stock_id in all_stock_ids:
         if stock_id not in stocks_meta:
@@ -104,6 +184,27 @@ def get_all_stocks_stats(db: Session) -> list:
             "chips": chips_counts.get(stock_id, 0),
             "dividends": dividend_counts.get(stock_id, 0)
         }
+        
+        # Inject price and marketCap details
+        data["price"] = price_map.get(stock_id, 0.0)
+        data["marketCap"] = mc_map.get(stock_id, 0.0)
+        
+        # Inject health score and stock_name
+        data["health_score"] = calculate_db_health_score(db, stock_id)
+        data["stock_name"] = data.get("name")
+        
+        # Fallback mechanism: if market cap is updated, use its timestamp for "price" datatype
+        mc_last_updated = mc_update_map.get(stock_id)
+        if mc_last_updated:
+            if "dataTypes" not in data:
+                data["dataTypes"] = {}
+            existing_price = data["dataTypes"].get("price", {}).get("lastUpdated", 0)
+            if mc_last_updated > existing_price:
+                from datetime import datetime
+                data["dataTypes"]["price"] = {
+                    "lastUpdated": mc_last_updated,
+                    "lastDataDate": datetime.fromtimestamp(mc_last_updated).strftime("%Y-%m-%d")
+                }
         
         # 只顯示真正有存入本地資料的股票
         total_rec = sum(data["records"].values())
