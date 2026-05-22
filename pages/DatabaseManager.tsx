@@ -1,7 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from '../App';
 import { DbSummary, DbStockStats } from '../types';
 import { API_BASE_URL } from '../services/api';
+
+interface SyncProgress {
+  is_running: boolean;
+  current_step: number;
+  total_steps: number;
+  percentage: number;
+  status_text: string;
+  error_message: string | null;
+  start_time: number;
+  end_time: number;
+}
 
 const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = ({ onNavigateToStock }) => {
   const [summary, setSummary] = useState<DbSummary | null>(null);
@@ -10,7 +21,12 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
   const [searchTerm, setSearchTerm] = useState('');
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
+  // 一鍵同步與個別同步的狀態
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [singleSyncing, setSingleSyncing] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'ALL' | 'SYNCED' | 'PARTIAL'>('ALL');
+  
+  const pollingTimer = useRef<number | null>(null);
 
   const fetchDbData = async () => {
     setIsLoading(true);
@@ -30,10 +46,80 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
     }
   };
 
-  useEffect(() => {
-    fetchDbData();
-  }, []);
+  // 輪詢同步進度
+  const checkSyncStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/database/sync-market-cap/status`);
+      if (res.ok) {
+        const data = await res.json();
+        const progress: SyncProgress = data.progress;
+        setSyncProgress(progress);
+        
+        if (!progress.is_running) {
+          // 同步結束，停止輪詢並重新整理
+          if (pollingTimer.current) {
+            window.clearInterval(pollingTimer.current);
+            pollingTimer.current = null;
+          }
+          fetchDbData();
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check sync status", e);
+    }
+  };
 
+  // 觸發一鍵批次同步
+  const handleBulkSync = async () => {
+    if (syncProgress?.is_running) return;
+    
+    if (!window.confirm("確定要一鍵更新所有股票的最新股價與市值嗎？\n這將自動下載證交所與櫃買中心數據，並非同步補齊缺失的發行股數快取。")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/database/sync-market-cap`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setSyncProgress(data.progress);
+        
+        // 開始每秒輪詢一次
+        if (pollingTimer.current) window.clearInterval(pollingTimer.current);
+        pollingTimer.current = window.setInterval(checkSyncStatus, 1000);
+      }
+    } catch (e) {
+      console.error("Failed to start bulk sync", e);
+      alert("啟動同步失敗");
+    }
+  };
+
+  // 觸發個別股票同步
+  const handleSingleSync = async (stockId: string, stockName: string) => {
+    if (singleSyncing) return;
+    setSingleSyncing(stockId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/stock/${stockId}/sync-market-cap`, { method: 'POST' });
+      if (res.ok) {
+        // 重新讀取資料
+        const sumRes = await fetch(`${API_BASE_URL}/database/summary`);
+        const stocksRes = await fetch(`${API_BASE_URL}/database/stocks`);
+        if (sumRes.ok && stocksRes.ok) {
+          setSummary(await sumRes.json());
+          setStocks(await stocksRes.json());
+        }
+      } else {
+        const errData = await res.json();
+        alert(errData.detail || `同步 ${stockName} 失敗`);
+      }
+    } catch (e) {
+      console.error("Single sync failed", e);
+      alert(`網路錯誤，同步 ${stockName} 失敗`);
+    } finally {
+      setSingleSyncing(null);
+    }
+  };
+
+  // 刪除本地快取
   const handleDelete = async (stockId: string) => {
     if (!window.confirm(`確定要刪除 ${stockId} 的所有本地資料嗎？這將需要重新從網路上抓取。`)) return;
     setIsDeleting(stockId);
@@ -49,6 +135,27 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
     }
   };
 
+  // 在組件載入時，先 fetch 資料，並檢查當前是否有正在執行的同步任務
+  useEffect(() => {
+    fetchDbData();
+    checkSyncStatus().then(() => {
+      // 如果後端本來就在跑同步，自動接力輪詢
+      fetch(`${API_BASE_URL}/database/sync-market-cap/status`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.progress?.is_running) {
+            setSyncProgress(data.progress);
+            if (pollingTimer.current) window.clearInterval(pollingTimer.current);
+            pollingTimer.current = window.setInterval(checkSyncStatus, 1000);
+          }
+        });
+    });
+
+    return () => {
+      if (pollingTimer.current) window.clearInterval(pollingTimer.current);
+    };
+  }, []);
+
   const filteredStocks = stocks.filter(s => {
     const matchesSearch = s.id.includes(searchTerm) || s.name.includes(searchTerm);
     const matchesTab = 
@@ -58,50 +165,98 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
     return matchesSearch && matchesTab;
   }).sort((a, b) => a.id.localeCompare(b.id));
 
-  const renderFreshnessBadge = (lastUpdated: number) => {
-    if (!lastUpdated) return <span className="text-xs px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400">部分快取</span>;
+  // 計算已快取總市值
+  const totalMarketCap = stocks.reduce((sum, s) => sum + (s.marketCap || 0), 0);
+
+  const renderFreshnessBadge = (lastUpdated: number | undefined | null, type: 'finance' | 'price') => {
+    if (!lastUpdated) return <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400/90 font-medium whitespace-nowrap shrink-0">未同步</span>;
     const daysAgo = (Date.now() / 1000 - lastUpdated) / 86400;
-    if (daysAgo < 1) return <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">今日更新</span>;
-    if (daysAgo < 7) return <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400">{Math.floor(daysAgo)} 天前</span>;
-    return <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400">過期</span>;
+    
+    if (type === 'price') {
+      if (daysAgo < 1.2) return <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/90 font-medium whitespace-nowrap shrink-0">今日更新</span>;
+      if (daysAgo < 3) return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400/90 font-medium whitespace-nowrap shrink-0">{Math.floor(daysAgo)} 天前</span>;
+      return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400/90 font-medium whitespace-nowrap shrink-0">需同步</span>;
+    } else {
+      if (daysAgo < 30) return <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/90 font-medium whitespace-nowrap shrink-0">最新</span>;
+      if (daysAgo < 90) return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400/90 font-medium whitespace-nowrap shrink-0">已快取</span>;
+      return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400/90 font-medium whitespace-nowrap shrink-0">過期</span>;
+    }
   };
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in relative max-w-6xl mx-auto font-sans">
+    <div className="flex flex-col gap-6 animate-fade-in relative max-w-6xl mx-auto font-sans text-slate-100 pb-12">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-surfaceLight pb-6">
         <div>
           <h1 className="text-3xl font-black text-white flex items-center gap-3">
-            <Icon name="database" className="text-amber-400" />
+            <Icon name="database" className="text-amber-400 animate-pulse" />
             圖形化資料庫管理
           </h1>
           <p className="text-textMuted mt-2">
-            監控本地 SQLite 儲存狀態，管理追蹤中的股票歷史數據與快取。
+            監控本地 SQLite 儲存狀態，管理追蹤中的股票歷史數據、最新股價與市值數據。
           </p>
         </div>
-        <button 
-          onClick={fetchDbData}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-surface hover:bg-surfaceLight border border-surfaceLight text-white transition-colors text-sm"
-        >
-          <Icon name="refresh" className={isLoading ? "animate-spin" : ""} />
-          重新整理
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleBulkSync}
+            disabled={syncProgress?.is_running}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-semibold transition-all duration-200 ${
+              syncProgress?.is_running 
+                ? 'bg-slate-850 text-slate-500 border-slate-700 cursor-not-allowed'
+                : 'bg-surface hover:bg-surfaceLight border-surfaceLight text-white hover:border-amber-500/40'
+            }`}
+          >
+            <Icon name="flash" className={`text-[16px] ${syncProgress?.is_running ? "animate-spin text-slate-500" : "text-amber-400"}`} />
+            {syncProgress?.is_running ? '同步中...' : '一鍵同步最新股價與市值'}
+          </button>
+          <button 
+            onClick={fetchDbData}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-surface hover:bg-surfaceLight border border-surfaceLight text-white transition-colors text-sm"
+          >
+            <Icon name="refresh" className={isLoading ? "animate-spin" : ""} />
+            重新整理
+          </button>
+        </div>
       </div>
+
+      {/* Syncing Progress Card */}
+      {syncProgress?.is_running && (
+        <div className="bg-surface border border-surfaceLight p-5 rounded-xl flex flex-col gap-4 animate-slide-down">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <Icon name="sync" className="animate-spin text-[20px]" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-white">大盤市值與股價高速同步中</div>
+                <div className="text-xs text-textMuted font-medium mt-0.5">{syncProgress.status_text}</div>
+              </div>
+            </div>
+            <div className="text-2xl font-black text-primary">{syncProgress.percentage}%</div>
+          </div>
+          <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-surfaceLight/30">
+            <div 
+              className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-300"
+              style={{ width: `${syncProgress.percentage}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
           { label: "資料庫實體大小", value: `${summary?.fileSizeMb || 0} MB`, icon: "hard_drive", color: "text-amber-400" },
           { label: "已快取股票數", value: summary?.totalStocks || 0, icon: "inventory", color: "text-blue-400" },
+          { label: "已快取公司總市值", value: `${totalMarketCap > 0 ? totalMarketCap.toLocaleString(undefined, {maximumFractionDigits: 1}) : 0} 億`, icon: "payments", color: "text-amber-400 font-bold" },
           { label: "總儲存資料筆數", value: summary?.totalRecords?.toLocaleString() || 0, icon: "table_rows", color: "text-emerald-400" },
-          { label: "財報歷史筆數", value: summary?.tableCounts?.financials?.toLocaleString() || 0, icon: "receipt_long", color: "text-purple-400" },
         ].map((stat, i) => (
-          <div key={i} className="bg-surface border border-surfaceLight p-5 rounded-xl flex items-center gap-4">
+          <div key={i} className="bg-surface border border-surfaceLight p-5 rounded-xl flex items-center gap-4 hover:border-surfaceLight/80 transition-colors">
             <div className={`size-12 rounded-lg bg-surfaceLight flex items-center justify-center ${stat.color}`}>
               <Icon name={stat.icon} className="text-[24px]" />
             </div>
             <div>
               <div className="text-xs text-textMuted font-bold mb-1">{stat.label}</div>
-              <div className="text-2xl font-black text-white">{stat.value}</div>
+              <div className="text-xl font-black text-white">{stat.value}</div>
             </div>
           </div>
         ))}
@@ -113,7 +268,7 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
           <div className="flex items-center gap-6">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Icon name="table" />
-              快取資料表目錄
+              追蹤股票狀態快取表
             </h2>
             <div className="flex items-center bg-background rounded-lg p-1 border border-surfaceLight">
               <button 
@@ -153,23 +308,25 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
             <thead>
               <tr className="bg-surfaceLight/10 text-textMuted text-xs uppercase tracking-wider">
                 <th className="p-4 font-medium">股票名稱/代號</th>
+                <th className="p-4 font-medium">最新收盤價</th>
+                <th className="p-4 font-medium">公司市值 (億元)</th>
                 <th className="p-4 font-medium">財報/股利筆數</th>
-                <th className="p-4 font-medium">股價/籌碼筆數</th>
-                <th className="p-4 font-medium">資料庫狀態</th>
-                <th className="p-4 font-medium text-right">操作管理</th>
+                 <th className="p-4 font-medium">股價/籌碼筆數</th>
+                 <th className="p-4 font-medium">最後同步時間 (股價/市值 | 季報)</th>
+                 <th className="p-4 font-medium text-right">操作管理</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surfaceLight/50">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="p-12 text-center text-textMuted">
+                  <td colSpan={7} className="p-12 text-center text-textMuted">
                     <Icon name="sync" className="animate-spin text-2xl mb-2" />
                     <p>載入中...</p>
                   </td>
                 </tr>
               ) : filteredStocks.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-12 text-center text-textMuted">目前分頁中沒有相符的股票資料</td>
+                  <td colSpan={7} className="p-12 text-center text-textMuted">目前分頁中沒有相符的股票資料</td>
                 </tr>
               ) : (
                 filteredStocks.map(stock => (
@@ -181,6 +338,20 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
                       >
                         {stock.name} <span className="text-textMuted text-xs ml-1 border border-surfaceLight rounded px-1">{stock.id}</span>
                       </div>
+                    </td>
+                    <td className="p-4">
+                      {stock.price ? (
+                        <span className="font-bold text-white">NT$ {stock.price.toFixed(1)}</span>
+                      ) : (
+                        <span className="text-textMuted">-</span>
+                      )}
+                    </td>
+                    <td className="p-4">
+                      {stock.marketCap ? (
+                        <span className="font-black text-amber-400">{stock.marketCap.toLocaleString()} 億</span>
+                      ) : (
+                        <span className="text-textMuted">-</span>
+                      )}
                     </td>
                     <td className="p-4">
                       <div className="flex gap-2">
@@ -195,15 +366,38 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
                       </div>
                     </td>
                     <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        {renderFreshnessBadge(stock.lastSyncTime)}
-                        <span className="text-xs text-textMuted">
-                          {stock.lastSyncTime ? new Date(stock.lastSyncTime * 1000).toLocaleDateString() : '-'}
-                        </span>
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-textMuted w-[64px] text-left shrink-0">股價/市值:</span>
+                          {renderFreshnessBadge(stock.dataTypes?.price?.lastUpdated, 'price')}
+                          <span className="text-slate-300 font-medium">
+                            {stock.dataTypes?.price?.lastUpdated ? new Date(stock.dataTypes.price.lastUpdated * 1000).toLocaleDateString() : '-'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-textMuted w-[64px] text-left shrink-0">季報歷史:</span>
+                          {renderFreshnessBadge(stock.dataTypes?.finance?.lastUpdated, 'finance')}
+                          <span className="text-slate-300 font-medium">
+                            {stock.dataTypes?.finance?.lastUpdated ? new Date(stock.dataTypes.finance.lastUpdated * 1000).toLocaleDateString() : '-'}
+                          </span>
+                        </div>
                       </div>
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => handleSingleSync(stock.id, stock.name)}
+                          disabled={singleSyncing !== null}
+                          className={`size-8 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center transition-colors ${
+                            singleSyncing === stock.id ? 'cursor-wait bg-primary/20 text-primary' : ''
+                          }`}
+                          title="個別更新最新價格與市值"
+                        >
+                          <Icon 
+                            name="sync" 
+                            className={`text-[18px] ${singleSyncing === stock.id ? 'animate-spin' : ''}`} 
+                          />
+                        </button>
                         <button 
                           onClick={() => onNavigateToStock(stock.id)}
                           className="size-8 rounded-full bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white flex items-center justify-center transition-colors"
