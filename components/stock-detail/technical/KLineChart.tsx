@@ -139,8 +139,8 @@ export const KLineChart: React.FC<KLineChartProps> = ({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { width: 1, color: 'rgba(226, 232, 240, 0.4)', style: LineStyle.Dotted, labelBackgroundColor: '#1e293b' },
-        horzLine: { width: 1, color: 'rgba(226, 232, 240, 0.4)', style: LineStyle.Dotted, labelBackgroundColor: '#1e293b' },
+        vertLine: { width: 1 as any, color: 'rgba(226, 232, 240, 0.4)', style: LineStyle.Dotted, labelBackgroundColor: '#1e293b' },
+        horzLine: { width: 1 as any, color: 'rgba(226, 232, 240, 0.4)', style: LineStyle.Dotted, labelBackgroundColor: '#1e293b' },
       },
       timeScale: {
         borderColor: 'rgba(51, 65, 85, 0.8)',
