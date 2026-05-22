@@ -161,6 +161,7 @@ class MarketCapCache(Base):
     id = Column(Integer, primary_key=True, index=True)
     stock_id = Column(String, unique=True, index=True)
     market_cap = Column(Float)
+    shares_outstanding = Column(Float, nullable=True) # 發行股數 (股)
     last_updated = Column(BigInteger)
 
 class Stock(Base):

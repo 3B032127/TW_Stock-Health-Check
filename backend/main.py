@@ -17,6 +17,27 @@ else:
 # Create DB tables
 models.Base.metadata.create_all(bind=database.engine)
 
+# Auto-migration for shares_outstanding column in market_cap_cache
+def upgrade_db_schema():
+    from sqlalchemy import text
+    db = database.SessionLocal()
+    try:
+        # Check if shares_outstanding column exists in market_cap_cache
+        res = db.execute(text("PRAGMA table_info(market_cap_cache)")).fetchall()
+        columns = [r[1] for r in res]
+        if "shares_outstanding" not in columns:
+            print("Upgrading database: Adding shares_outstanding column to market_cap_cache table...")
+            db.execute(text("ALTER TABLE market_cap_cache ADD COLUMN shares_outstanding FLOAT"))
+            db.commit()
+            print("Database upgrade completed successfully.")
+    except Exception as e:
+        print(f"Error upgrading database: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+upgrade_db_schema()
+
 app = FastAPI(
     title="Taiwan Stock Health Check API",
     description="Backend API for financial data analysis",
@@ -1118,3 +1139,27 @@ async def read_stock_intraday(
     except Exception as e:
         print(f"Error fetching intraday for {stock_id}: {e}")
         return {"status": "error", "message": str(e), "data": []}
+
+@app.post("/api/v1/database/sync-market-cap")
+async def trigger_bulk_market_cap_sync():
+    """一鍵同步所有股票市值與最新股價 (背景非同步執行)"""
+    from .services import market_cap_service
+    # 傳入 Session 產生器，供背景執行序使用
+    res = market_cap_service.start_sync_market_caps(database.SessionLocal)
+    return res
+
+@app.get("/api/v1/database/sync-market-cap/status")
+def get_bulk_market_cap_sync_status():
+    """查詢當前全體市值與股價同步之進度狀態"""
+    from .services import market_cap_service
+    return {"status": "success", "progress": market_cap_service.sync_progress}
+
+@app.post("/api/v1/stock/{stock_id}/sync-market-cap")
+async def trigger_single_market_cap_sync(stock_id: str, db: Session = Depends(get_db)):
+    """個別同步特定股票的最新價格與市值"""
+    from .services import market_cap_service
+    res = await market_cap_service.sync_single_market_cap(db, stock_id)
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
