@@ -1,4 +1,7 @@
-import shioaji as sj
+try:
+    import shioaji as sj
+except ImportError:
+    sj = None
 import os
 import pandas as pd
 from typing import Dict, List, Optional
@@ -10,11 +13,13 @@ class ShioajiService:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(ShioajiService, cls).__new__(cls)
-            cls._instance.api = sj.Shioaji()
+            cls._instance.api = sj.Shioaji() if sj is not None else None
             cls._instance.is_logged_in = False
         return cls._instance
 
     def login(self) -> bool:
+        if self.api is None:
+            return False
         if not self.is_logged_in:
             api_key = os.getenv("SHIOAJI_API_KEY")
             # If secret_key is not explicitly set, we might not be able to login.

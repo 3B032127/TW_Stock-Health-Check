@@ -14,14 +14,26 @@ FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 
 class TokenManager:
     def __init__(self):
+        self._load_tokens()
+        self.current_idx = 0
+
+    def _load_tokens(self):
+        env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env.local")
+        if not os.path.exists(env_path):
+            env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+        load_dotenv(dotenv_path=env_path, override=True)
         tokens = [
             os.getenv("FINMIND_TOKEN_1", os.getenv("FINMIND_TOKEN")),
             os.getenv("FINMIND_TOKEN_2")
         ]
         self.tokens = [{"key": t, "exhausted_until": 0, "name": f"Key_{i+1}"} for i, t in enumerate(tokens) if t]
-        self.current_idx = 0
 
     def get_token(self):
+        if not self.tokens:
+            self._load_tokens()
+        if not self.tokens:
+            return None
+
         now = time.time()
         for i in range(len(self.tokens)):
             idx = (self.current_idx + i) % len(self.tokens)
@@ -84,14 +96,14 @@ class FinMindClient:
         retry_count = 0
         while retry_count < max_retries:
             token_info = token_manager.get_token()
-            now = time.time()
-            if token_info["exhausted_until"] > now:
-                wait_time = int(token_info["exhausted_until"] - now)
-                print(f"All tokens exhausted. Waiting {wait_time}s for {token_info['name']} to reset.")
-                await asyncio.sleep(min(10, wait_time)) # Sleep in smaller increments
-                continue
-
-            params["token"] = token_info["key"]
+            if token_info:
+                now = time.time()
+                if token_info["exhausted_until"] > now:
+                    wait_time = int(token_info["exhausted_until"] - now)
+                    print(f"All tokens exhausted. Waiting {wait_time}s for {token_info['name']} to reset.")
+                    await asyncio.sleep(min(10, wait_time)) # Sleep in smaller increments
+                    continue
+                params["token"] = token_info["key"]
             
             try:
                 response = await self.client.get(FINMIND_API_URL, params=params)
@@ -100,17 +112,18 @@ class FinMindClient:
                     # Specific optimization: TaiwanStockInfo often hits IP limits differently.
                     # If it's a metadata request, we might not want to kill the token for an hour
                     if dataset == "TaiwanStockInfo":
-                        print(f"FinMind Token {token_info['name']} cannot fetch stock list (402). Skipping metadata...")
+                        print(f"FinMind Token cannot fetch stock list (402). Skipping metadata...")
                         return []
                         
-                    print(f"FinMind Token {token_info['name']} quota exhausted (402). Switching...")
-                    token_manager.mark_exhausted(token_info["key"], reset_after_seconds=3600)
+                    if token_info:
+                        print(f"FinMind Token {token_info['name']} quota exhausted (402). Switching...")
+                        token_manager.mark_exhausted(token_info["key"], reset_after_seconds=3600)
                     retry_count += 1
                     await asyncio.sleep(2)
                     continue
                     
                 if response.status_code == 429:
-                    print(f"FinMind Token {token_info['name']} burst rate limit (429). Waiting 10s...")
+                    print(f"FinMind Token burst rate limit (429). Waiting 10s...")
                     # 429 is usually a short-term burst limit, don't kill the token for an hour
                     retry_count += 1
                     await asyncio.sleep(10)

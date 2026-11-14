@@ -218,8 +218,8 @@ async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: in
     db_items = db.query(model_class).filter_by(stock_id=stock_id)\
                  .order_by(model_class.year.desc(), model_class.quarter.desc()).limit(limit).all()
     
-    # If not forcing sync and we have some data, or if we are not forcing sync at all
-    if not force_sync:
+    # Return from DB if we already have data and are not forcing a sync
+    if not force_sync and len(db_items) > 0:
         return "db", db_items
 
     

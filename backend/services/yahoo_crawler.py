@@ -451,7 +451,7 @@ class YahooStockCrawler:
             for row in rows:
                 texts = list(row.stripped_strings)
                 # Ensure the row has enough columns (year, cash, stock, yield, etc.)
-                if len(texts) >= 4 and ("2023" in texts or "2024" in texts or "2025" in texts or "2022" in texts or "2021" in texts or "2020" in texts) and not "股利所屬期間" in texts:
+                if len(texts) >= 4 and any(y in texts for y in ("2026", "2025", "2024", "2023", "2022", "2021", "2020")) and "股利所屬期間" not in texts:
                     try:
                         # Assuming structure could be:
                         # Standard length >= 6: [year, previous_year_if_compare, cash_dividend, compare, yield, days_to_fill, ex_dividend_date...]

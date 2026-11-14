@@ -357,9 +357,20 @@ async def read_stock_dividends(stock_id: str, db: Session = Depends(get_db)):
     crawler = YahooStockCrawler()
     try:
         dividends = await crawler.get_dividend_history(stock_id)
+        if not dividends:
+            _, items = await market.get_dividend_data(db, stock_id)
+            if items:
+                yearly = {}
+                for i in items:
+                    y = str(i.year)
+                    if y not in yearly:
+                        yearly[y] = {"year": y, "cash": 0.0, "stock": 0.0, "date": i.date or "-"}
+                    yearly[y]["cash"] = round(yearly[y]["cash"] + float(i.cash or 0), 2)
+                    yearly[y]["stock"] = round(yearly[y]["stock"] + float(i.stock or 0), 2)
+                dividends = sorted(yearly.values(), key=lambda x: x["year"], reverse=True)[:5]
         return {
             "status": "success",
-            "source": "yahoo",
+            "source": "yahoo+finmind",
             "data": dividends
         }
     finally:
@@ -475,6 +486,13 @@ async def read_stock_peers(stock_id: str, db: Session = Depends(get_db)):
 
     # 1. 獲取當前股票的產業資訊
     target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+    if not target_stock:
+        try:
+            from .services.stock_service import sync_stocks_info
+            await sync_stocks_info(db)
+            target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+        except Exception as e:
+            print(f"Auto sync_stocks_info failed: {e}")
     if not target_stock:
         return {"status": "error", "message": "Stock not found in DB. Please sync first."}
     
@@ -877,8 +895,10 @@ def read_market_indicators(db: Session = Depends(get_db)):
         "source": "yfinance+gemini",
         "data": data
     }
-    # 存儲快取
-    cache_service.set_cached_response(db, "market", "indicators", res)
+    # 僅在核心指標有效時存儲快取
+    inds = data.get("indicators", []) if isinstance(data, dict) else []
+    if any(i.get("id") == "taiex" and i.get("value") not in ("N/A", "", None) for i in inds):
+        cache_service.set_cached_response(db, "market", "indicators", res)
     return res
 
 
@@ -890,7 +910,7 @@ def read_taiex_data(period: str = Query(default="1m", pattern="^(1d|1w|1m|1y)$")
     """
     # 嘗試讀取快取
     cached = cache_service.get_cached_response(db, "market", f"taiex_{period}")
-    if cached:
+    if cached and cached.get("data", {}).get("history"):
         return cached
 
     from .services.indicators import get_indicators_service
@@ -903,8 +923,9 @@ def read_taiex_data(period: str = Query(default="1m", pattern="^(1d|1w|1m|1y)$")
         "source": "yfinance",
         "data": data
     }
-    # 存儲快取
-    cache_service.set_cached_response(db, "market", f"taiex_{period}", res)
+    # 僅在包含歷史走勢數據時存儲快取
+    if data and data.get("history"):
+        cache_service.set_cached_response(db, "market", f"taiex_{period}", res)
     return res
 
 
@@ -961,7 +982,7 @@ async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50), db: Sess
     """
     # 嘗試讀取快取
     cached = cache_service.get_cached_response(db, "market", f"gainers_{limit}")
-    if cached:
+    if cached and any(r.get("price", 0) > 0 for r in cached.get("data", {}).get("rankings", [])):
         return cached
 
     from .services.yahoo_crawler import YahooStockCrawler
@@ -976,8 +997,9 @@ async def read_top_gainers(limit: int = Query(default=10, ge=1, le=50), db: Sess
                 "rankings": rankings
             }
         }
-        # 存儲快取
-        cache_service.set_cached_response(db, "market", f"gainers_{limit}", res)
+        # 僅在排行榜有非零價格時存儲快取
+        if rankings and any(r.get("price", 0) > 0 for r in rankings):
+            cache_service.set_cached_response(db, "market", f"gainers_{limit}", res)
         return res
     finally:
         await crawler.close()
@@ -990,7 +1012,7 @@ async def read_top_losers(limit: int = Query(default=10, ge=1, le=50), db: Sessi
     """
     # 嘗試讀取快取
     cached = cache_service.get_cached_response(db, "market", f"losers_{limit}")
-    if cached:
+    if cached and any(r.get("price", 0) > 0 for r in cached.get("data", {}).get("rankings", [])):
         return cached
 
     from .services.yahoo_crawler import YahooStockCrawler
@@ -1005,8 +1027,9 @@ async def read_top_losers(limit: int = Query(default=10, ge=1, le=50), db: Sessi
                 "rankings": rankings
             }
         }
-        # 存儲快取
-        cache_service.set_cached_response(db, "market", f"losers_{limit}", res)
+        # 僅在排行榜有非零價格時存儲快取
+        if rankings and any(r.get("price", 0) > 0 for r in rankings):
+            cache_service.set_cached_response(db, "market", f"losers_{limit}", res)
         return res
     finally:
         await crawler.close()

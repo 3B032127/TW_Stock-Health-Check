@@ -71,8 +71,12 @@ def categorize_stock(stock_id: str, name: str, industry: str) -> str:
 async def sync_stocks_info(db: Session):
     """從 FinMind 同步並分類所有股票"""
     try:
+        import os
+        token = os.getenv("FINMIND_TOKEN_1") or os.getenv("FINMIND_TOKEN") or ""
         url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo"
-        response = requests.get(url)
+        if token:
+            url += f"&token={token}"
+        response = requests.get(url, timeout=30)
         data = response.json().get("data", [])
         
         now = int(time.time())

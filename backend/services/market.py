@@ -12,15 +12,15 @@ async def get_chips_data(db: Session, stock_id: str, days: int = 30, force_sync:
         models.ChipsDaily.stock_id == stock_id
     ).order_by(models.ChipsDaily.date.asc()).all()
 
-    # If we are not forcing sync, return DB data
-    if not force_sync:
-        # DB queries return everything, we will truncate to `days` at return or let frontend handle it.
-        # But we filter here
+    # If we are not forcing sync and already have DB data, return DB data
+    if not force_sync and len(db_items) > 0:
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        return "db", [i for i in db_items if i.date >= start_date]
+        filtered = [i for i in db_items if i.date >= start_date]
+        return "db", filtered if filtered else db_items[-days:]
 
-    # For forced sync, we fetch 5 years
-    start_date = (datetime.now() - timedelta(days=365*5)).strftime("%Y-%m-%d")
+    # Fetch 5 years if forced sync, otherwise fetch requested window
+    fetch_days = 365 * 5 if force_sync else max(days + 15, 60)
+    start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
 
     # 2. Fetch from API
     client = FinMindClient()
@@ -76,12 +76,14 @@ async def get_stock_price(db: Session, stock_id: str, days: int = 180, force_syn
         models.StockPriceDaily.stock_id == stock_id
     ).order_by(models.StockPriceDaily.date.asc()).all()
     
-    if not force_sync:
+    if not force_sync and len(db_items) > 0:
         ui_start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        return "db", [i for i in db_items if i.date >= ui_start_date]
+        filtered = [i for i in db_items if i.date >= ui_start_date]
+        return "db", filtered if filtered else db_items[-days:]
         
-    # For forced sync, fetch 5 years
-    start_date = (datetime.now() - timedelta(days=365*5)).strftime("%Y-%m-%d")
+    # Fetch 5 years if forced sync, otherwise fetch requested window
+    fetch_days = 365 * 5 if force_sync else max(days + 30, 365)
+    start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
         
     client = FinMindClient()
     data_list = await client.fetch_price(stock_id, start_date, end_date)
@@ -118,7 +120,7 @@ async def get_stock_price(db: Session, stock_id: str, days: int = 180, force_syn
 async def get_dividend_data(db: Session, stock_id: str, force_sync: bool = False):
     db_items = db.query(models.Dividend).filter_by(stock_id=stock_id).order_by(models.Dividend.year.desc()).all()
     
-    if not force_sync:
+    if not force_sync and len(db_items) > 0:
         return "db", db_items
         
     client = FinMindClient()
@@ -130,22 +132,24 @@ async def get_dividend_data(db: Session, stock_id: str, force_sync: bool = False
     
     if not data_list: return "api", db_items
     
+    from .finance import parse_taiwan_year
     for d in data_list:
-        if not d.get('year'): continue
-        # FinMind 'year' might be string or float
-        y_val = d.get('year')
+        y_val = d.get('year') or (d.get('date', '')[:4] if d.get('date') else None)
+        if not y_val:
+            continue
         try:
-            year_int = int(float(y_val))
-        except:
+            year_int = parse_taiwan_year(str(y_val))
+        except Exception:
             continue
             
-        existing = db.query(models.Dividend).filter_by(stock_id=stock_id, year=year_int).first()
+        date_val = d.get('date') or f"{year_int}-01-01"
+        existing = db.query(models.Dividend).filter_by(stock_id=stock_id, date=date_val, year=year_int).first()
         if not existing:
-            cash = float(d.get('CashEarningsDistribution', 0) or 0)
-            stock = float(d.get('StockEarningsDistribution', 0) or 0)
+            cash = float(d.get('CashEarningsDistribution', 0) or 0) + float(d.get('CashStatutorySurplus', 0) or 0)
+            stock = float(d.get('StockEarningsDistribution', 0) or 0) + float(d.get('StockStatutorySurplus', 0) or 0)
             item = models.Dividend(
                 stock_id=stock_id,
-                date=d['date'],
+                date=date_val,
                 year=year_int,
                 cash=cash,
                 stock=stock,

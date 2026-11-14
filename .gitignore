@@ -32,3 +32,8 @@ __pycache__/
 *.db
 financial_data.db
 *.sqlite
+.env
+.env.local
+*.db
+venv/
+start.sh
