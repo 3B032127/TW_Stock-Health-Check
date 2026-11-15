@@ -178,6 +178,36 @@ export const api = {
         const response = await fetch(`${API_BASE_URL}/stock/${stockId}/intraday`);
         if (!response.ok) throw new Error('Network response was not ok');
         return response.json();
+    },
+
+    // Goldman Sachs gs-quant Analytics
+    getGSFactor: async (stockId: string, date?: string, forceRefresh: boolean = false) => {
+        const params = new URLSearchParams();
+        if (date) params.set('date', date);
+        if (forceRefresh) params.set('force_refresh', 'true');
+        const qs = params.toString() ? `?${params.toString()}` : '';
+        const response = await fetch(`${API_BASE_URL}/gs_quant/stock/${stockId}/factor${qs}`);
+        if (!response.ok) throw new Error('Failed to fetch gs-quant factor exposures');
+        return response.json();
+    },
+
+    getGSBacktest: async (
+        stockId: string,
+        strategy: string = 'multi_factor',
+        startDate?: string,
+        endDate?: string,
+        initialCapital: number = 1000000,
+        forceRefresh: boolean = false
+    ) => {
+        const params = new URLSearchParams();
+        params.set('strategy', strategy);
+        params.set('initial_capital', String(initialCapital));
+        if (startDate) params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
+        if (forceRefresh) params.set('force_refresh', 'true');
+        const response = await fetch(`${API_BASE_URL}/gs_quant/stock/${stockId}/backtest?${params.toString()}`);
+        if (!response.ok) throw new Error('Failed to execute gs-quant backtest');
+        return response.json();
     }
 };
 

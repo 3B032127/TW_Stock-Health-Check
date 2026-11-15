@@ -3,7 +3,7 @@ uvicorn==0.27.0
 sqlalchemy==2.0.25
 pydantic==2.6.0
 pydantic-settings==2.1.0
-httpx==0.26.0
+httpx>=0.26.0
 python-dotenv==1.0.1
 yfinance>=0.2.54
 beautifulsoup4==4.12.3
@@ -13,3 +13,5 @@ FinMind==1.6.0
 pandas==2.2.0
 deep-translator==1.11.4
 alembic==1.13.1
+gs-quant>=0.9.0
+scipy>=1.11.0

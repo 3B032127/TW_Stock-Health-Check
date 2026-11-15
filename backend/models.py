@@ -173,3 +173,25 @@ class Stock(Base):
     market_type = Column(String)               # twse / tpex / emergent
     last_updated = Column(BigInteger)
 
+
+class GSFactorResult(Base):
+    __tablename__ = "gs_factor"
+    id = Column(Integer, primary_key=True, index=True)
+    ticker = Column(String, index=True)
+    date = Column(String, index=True)          # YYYY-MM-DD
+    factor_name = Column(String, index=True)   # Momentum, Value, Quality, LowVolatility, MarketBeta, SmartMoney
+    exposure = Column(Float)                   # Standardized Z-score (-3.0 to +3.0)
+    percentile = Column(Float, nullable=True)  # 0 to 100
+    __table_args__ = (UniqueConstraint('ticker', 'date', 'factor_name', name='uix_gs_factor_ticker_date_name'),)
+
+
+class GSBacktestResult(Base):
+    __tablename__ = "gs_backtest"
+    id = Column(Integer, primary_key=True, index=True)
+    portfolio_id = Column(String, index=True)  # e.g. ticker "2330"
+    strategy = Column(String, index=True)      # e.g. "multi_factor", "ma_cross", "rsi_mean_reversion", "macd_momentum"
+    start_date = Column(String)
+    end_date = Column(String)
+    metric = Column(String)                    # e.g. "Sharpe", "CumulativeReturn", "MaxDrawdown", "WinRate", "Alpha"
+    value = Column(Float)
+

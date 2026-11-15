@@ -248,7 +248,9 @@ export enum StockTab {
   QUOTE = 'QUOTE',
   CHIPS = 'CHIPS',
   HEALTH_CHECK = 'HEALTH_CHECK',
-  FINANCIALS = 'FINANCIALS'
+  FINANCIALS = 'FINANCIALS',
+  GS_FACTOR = 'GS_FACTOR',
+  GS_BACKTEST = 'GS_BACKTEST'
 }
 
 export enum FinancialSubTab {
@@ -298,4 +300,115 @@ export interface TechnicalIndicators {
   obv: IndicatorValue[];
   upperBand: IndicatorValue[];
   lowerBand: IndicatorValue[];
+}
+
+// --- Goldman Sachs gs-quant Types ---
+export interface GSFactorDetail {
+  id: string;
+  name: string;
+  exposure: number;
+  percentile: number;
+  score: number;
+  signal: string;
+  description: string;
+}
+
+export interface GSRiskMetrics {
+  annualized_volatility_20d: number;
+  annualized_volatility_60d: number;
+  sharpe_ratio_60d: number;
+  sharpe_ratio_252d: number;
+  max_drawdown_252d: number;
+  beta_60d: number;
+  correlation_taiex_60d: number;
+  rsi_14: number;
+  price_zscore_60d: number;
+  price_percentile_252d: number;
+  return_20d_pct: number;
+  return_60d_pct: number;
+}
+
+export interface GSRollingPoint {
+  date: string;
+  close: number;
+  zscore_20d: number;
+  volatility_20d: number;
+  rsi_14: number;
+  beta_60d: number;
+  ma_20: number;
+  bb_upper: number;
+  bb_lower: number;
+}
+
+export interface GSFactorData {
+  ticker: string;
+  date: string;
+  engine: string;
+  gs_quant_version: string;
+  marquee_connected: boolean;
+  benchmark: string;
+  exposures: Record<string, number>;
+  factors_detail: GSFactorDetail[];
+  risk_metrics: GSRiskMetrics;
+  composite_score: number;
+  quant_quadrant: string;
+  rolling_series: GSRollingPoint[];
+}
+
+export interface GSBacktestMetrics {
+  cumulative_return: number;
+  benchmark_return: number;
+  excess_return: number;
+  annualized_return: number;
+  annualized_volatility: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  max_drawdown: number;
+  calmar_ratio: number;
+  win_rate: number;
+  profit_factor: number;
+  total_trades: number;
+  final_equity: number;
+  initial_capital: number;
+}
+
+export interface GSEquityPoint {
+  date: string;
+  strategy_nav: number;
+  benchmark_nav: number;
+  strategy_return_pct: number;
+  benchmark_return_pct: number;
+  drawdown_pct: number;
+  position: number;
+}
+
+export interface GSTradeRecord {
+  date: string;
+  action: string;
+  price: number;
+  weight: number;
+  trade_return_pct: number | null;
+  reason: string;
+}
+
+export interface GSBacktestStrategyInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface GSBacktestData {
+  ticker: string;
+  strategy: string;
+  strategy_name: string;
+  strategy_description: string;
+  available_strategies: GSBacktestStrategyInfo[];
+  start_date: string;
+  end_date: string;
+  trading_days: number;
+  engine: string;
+  gs_quant_version: string;
+  metrics: GSBacktestMetrics;
+  equity_curve: GSEquityPoint[];
+  trade_log: GSTradeRecord[];
 }
