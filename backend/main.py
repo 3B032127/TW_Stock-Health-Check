@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from . import models, schemas, database
 from .services import finance, market, cache_service
+from .api import gs_quant_routes
 import os
 from dotenv import load_dotenv
 
@@ -147,16 +148,37 @@ async def read_cash_flow_history(
 stock_list_cache = None
 
 @app.get("/api/v1/stock/list")
-async def read_stock_list():
-    """獲取台股所有股票代碼與名稱清單"""
+async def read_stock_list(db: Session = Depends(get_db)):
+    """獲取台股所有股票代碼與名稱清單（優先使用本地資料庫，確保秒開且不消耗 API 額度）"""
     global stock_list_cache
-    if stock_list_cache is not None:
+    if stock_list_cache is not None and len(stock_list_cache) > 0 and "type" in stock_list_cache[0]:
         return {
             "status": "success",
             "source": "finmind_cache",
             "data": stock_list_cache
         }
+
+    # 1. 優先從本地資料庫 stocks 表讀取，立即可用且不卡頓
+    from . import models
+    db_stocks = db.query(models.Stock).all()
+    if db_stocks:
+        stock_list_cache = [
+            {
+                "stock_id": s.stock_id,
+                "stock_name": s.name,
+                "industry_category": s.industry,
+                "type": s.market_type,
+                "market": s.market_type
+            }
+            for s in db_stocks
+        ]
+        return {
+            "status": "success",
+            "source": "database",
+            "data": stock_list_cache
+        }
         
+    # 2. 資料庫若空，回退透過 FinMind API 獲取
     from .services.finmind import FinMindClient
     client = FinMindClient()
     try:
@@ -260,91 +282,112 @@ async def get_market_cap(sid: str, suffix: str = "TW", db: Session = None) -> fl
 
 @app.get("/api/v1/stock/{stock_id}/profile")
 async def read_stock_profile(stock_id: str, db: Session = Depends(get_db)):
-    """獲取個別公司的詳細資料"""
+    """獲取個別公司的詳細資料（以本地資料庫優先計算市值排名，避免任何 API 阻塞）"""
     from .services.yahoo_crawler import YahooStockCrawler
-    from .services.finmind import FinMindClient
-    import asyncio
-    
-    global stock_list_cache
+    from . import models
     
     crawler = YahooStockCrawler()
     try:
-        # 首先嘗試獲取基本資料 (最核心內容)
+        # 1. 嘗試獲取公司基本資訊
         profile = await crawler.get_company_profile(stock_id)
         if not profile:
-            raise HTTPException(status_code=404, detail="Company profile not found")
+            # 若爬蟲暫態失敗，直接由本地資料庫 fallback 生成基本 profile
+            target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+            if target_stock:
+                profile = {
+                    'id': stock_id,
+                    'name': target_stock.name,
+                    'industry': target_stock.industry or '其他',
+                    'sector': target_stock.industry or '其他',
+                    'description': f"{target_stock.name} ({stock_id})，主要營運領域為{target_stock.industry or '其他'}。",
+                    'chairman': 'N/A',
+                    'ceo': 'N/A',
+                    'foundedDate': 'N/A',
+                    'listingDate': 'N/A',
+                    'capital': 'N/A',
+                    'website': 'N/A',
+                    'marketCap': 'N/A',
+                    'fullTimeEmployees': 'N/A',
+                    'financialHighlights': {
+                        'monthlyRevenue': {'value': 'N/A', 'yoy': 0},
+                        'eps': 'N/A',
+                        'grossMargin': 0,
+                        'operatingMargin': 0,
+                        'netMargin': 0
+                    }
+                }
+            else:
+                raise HTTPException(status_code=404, detail="Company profile not found")
             
-        # 初始化排名資料為預設值
-        ranking_info = {"rank": 0, "total": 0, "industry": profile.get("industry", "未知")}
+        # 2. 產業地位與市值排名：100% 透過本地 SQLite 資料庫高速計算，零外部 API 依賴
+        target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+        target_industry = target_stock.industry if (target_stock and target_stock.industry) else profile.get("industry", "其他")
+        profile["industry"] = target_industry
         
-        # 嘗試計算排名，失敗不應影響主畫面
-        try:
-            global stock_list_cache, industry_ranking_cache, industry_ranking_cache_date
-            
-            # 每日清空快取
-            today = datetime.now().strftime("%Y-%m-%d")
-            if industry_ranking_cache_date != today:
-                industry_ranking_cache.clear()
-                industry_ranking_cache_date = today
+        # 產業名稱標準化與模糊匹配（解決 Yahoo「半導體」與資料庫「半導體業」之字尾差異）
+        base_ind = target_industry.replace("業", "") if target_industry.endswith("業") else target_industry
+        industry_rankings = db.query(
+            models.Stock.stock_id,
+            models.MarketCapCache.market_cap
+        ).outerjoin(
+            models.MarketCapCache, models.Stock.stock_id == models.MarketCapCache.stock_id
+        ).filter(
+            models.Stock.industry.like(f"%{base_ind}%")
+        ).order_by(
+            models.MarketCapCache.market_cap.desc().nullslast()
+        ).all()
 
-            if stock_list_cache is None:
-                # 這裡使用短暫的 Timeout 以免卡住主請求
-                from .services.finmind import FinMindClient
-                fm_client = FinMindClient()
-                try:
-                    # 抓取股票資訊，如果超時就跳過
-                    stock_list_cache = await fm_client.fetch_stock_info()
-                finally:
-                    await fm_client.close()
-            
-            if stock_list_cache:
-                target_info = next((s for s in stock_list_cache if s.get("stock_id") == stock_id), None)
-                target_industry = target_info.get("industry_category") if target_info else profile.get("industry")
+        total = len(industry_rankings)
+        rank = 0
+        if total > 0:
+            try:
+                rank = next(i for i, r in enumerate(industry_rankings) if r[0] == stock_id) + 1
+            except StopIteration:
+                rank = 0
                 
-                if target_industry:
-                    # 如果快取沒有這個產業，則抓取全產業真實市值
-                    if target_industry not in industry_ranking_cache:
-                        industry_peers = [s for s in stock_list_cache 
-                                         if s.get("industry_category") == target_industry 
-                                         and len(s.get("stock_id", "")) == 4
-                                         and s.get("type") in ("twse", "tpex")]
-                        
-                        # 併發抓取所有人的市值 (get_market_cap 現在會優先使用資料庫暫存)
-                        mc_tasks = [get_market_cap(p.get("stock_id", ""), "TW" if p.get("type") == "twse" else "TWO", db) for p in industry_peers]
-                        mc_results = await asyncio.gather(*mc_tasks)
-                        
-                        valid_peers = []
-                        for i, p in enumerate(industry_peers):
-                            if mc_results[i] > 0:
-                                valid_peers.append({"stock_id": p.get("stock_id"), "mc": mc_results[i]})
-                        
-                        # 依據市值降冪排序
-                        valid_peers.sort(key=lambda x: x["mc"], reverse=True)
-                        industry_ranking_cache[target_industry] = valid_peers
-                    
-                    # 從快取取得排名
-                    cached_peers = industry_ranking_cache.get(target_industry, [])
-                    ranking_info["total"] = len(cached_peers)
-                    if ranking_info["total"] > 0:
-                        try:
-                            # 找出自己在排序中的位置 (1-indexed)
-                            rank = next(i for i, p in enumerate(cached_peers) if p["stock_id"] == stock_id) + 1
-                            ranking_info["rank"] = rank
-                        except StopIteration:
-                            ranking_info["rank"] = 0
-        except Exception as rank_err:
-            print(f"Ranking feature failed for {stock_id}: {rank_err}")
-            
+        ranking_info = {
+            "rank": rank,
+            "total": total,
+            "industry": target_industry
+        }
         profile["ranking"] = ranking_info
+
+        # 3. 補強 financialHighlights：若爬蟲缺少數據，優先由本地資料庫財報補齊，保證完整顯示
+        fh = profile.get("financialHighlights", {})
+        latest_reports = db.query(models.FinancialStatement).filter_by(stock_id=stock_id)\
+                           .order_by(models.FinancialStatement.year.desc(), models.FinancialStatement.quarter.desc()).limit(5).all()
+        if latest_reports:
+            latest_is = latest_reports[0]
+            if fh.get("monthlyRevenue", {}).get("value") == 'N/A' and latest_is.revenue and latest_is.revenue > 0:
+                rev_in_hundred_million = latest_is.revenue / 100000000
+                yoy = 0.0
+                prev_is = next((r for r in latest_reports if r.year == latest_is.year - 1 and r.quarter == latest_is.quarter), None)
+                if prev_is and prev_is.revenue and prev_is.revenue > 0:
+                    yoy = round(((latest_is.revenue - prev_is.revenue) / prev_is.revenue) * 100, 2)
+                fh["monthlyRevenue"] = {
+                    "value": f"{rev_in_hundred_million:,.2f}",
+                    "yoy": yoy
+                }
+            if fh.get("eps") in ('N/A', None, 0, '0', '0.00'):
+                valid_eps = [r.eps for r in latest_reports[:4] if r.eps is not None]
+                ttm_eps = sum(valid_eps) if len(valid_eps) == 4 else (sum(valid_eps) * (4 / len(valid_eps)) if valid_eps else None)
+                if ttm_eps is not None:
+                    fh["eps"] = f"{ttm_eps:.2f}"
+            if fh.get("grossMargin", 0) == 0 and latest_is.gross_profit and latest_is.revenue:
+                fh["grossMargin"] = round((latest_is.gross_profit / latest_is.revenue) * 100, 2)
+            if fh.get("operatingMargin", 0) == 0 and latest_is.operating_income and latest_is.revenue:
+                fh["operatingMargin"] = round((latest_is.operating_income / latest_is.revenue) * 100, 2)
+            if fh.get("netMargin", 0) == 0 and latest_is.net_income and latest_is.revenue:
+                fh["netMargin"] = round((latest_is.net_income / latest_is.revenue) * 100, 2)
+        profile["financialHighlights"] = fh
 
         return {
             "status": "success",
-            "source": "yahoo+finmind+ranking_safe",
+            "source": "database+profile",
             "data": profile
         }
     except Exception as e:
         print(f"Critical error in read_stock_profile: {e}")
-        # 如果是核心邏輯報錯且有備案
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         await crawler.close()
@@ -416,20 +459,89 @@ async def read_news_content(url: str):
 
 @app.get("/api/v1/stock/{stock_id}/valuation")
 async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
-    """獲取個股核心估值指標 (PE, PB, Yield) 與近 30 天走勢"""
-    from .services.finmind import FinMindClient
+    """獲取個股核心估值指標 (PE, PB, Yield) 與股價走勢（優先自本地 SQLite 快速計算，零外部 API 依賴）"""
+    from . import models
     from datetime import datetime, timedelta
-    
+
+    # 1. 優先從本地資料庫讀取股價歷史與財務紀錄
+    prices = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id)\
+               .order_by(models.StockPriceDaily.date.asc()).all()
+
+    if not prices or len(prices) == 0:
+        # 本地若無股價，呼叫 market.get_stock_price（具備 yfinance 自動備援入庫，不耗費 FinMind 額度）
+        try:
+            await market.get_stock_price(db, stock_id, days=365, force_sync=False)
+            prices = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id)\
+                       .order_by(models.StockPriceDaily.date.asc()).all()
+        except Exception as e:
+            print(f"Error auto-fetching prices for {stock_id}: {e}")
+
+    if prices and len(prices) > 0:
+        latest_price = float(prices[-1].close or 0)
+        recent_prices = prices[-250:] if len(prices) > 250 else prices
+        sparkline_data = [{"time": p.date, "value": float(p.close or 0)} for p in recent_prices]
+
+        # 計算近四季 EPS (TTM EPS)
+        recent_reports = db.query(models.FinancialStatement).filter_by(stock_id=stock_id)\
+                           .order_by(models.FinancialStatement.year.desc(), models.FinancialStatement.quarter.desc()).limit(4).all()
+        valid_eps = [r.eps for r in recent_reports if r.eps is not None]
+        ttm_eps = sum(valid_eps) if len(valid_eps) == 4 else (sum(valid_eps) * (4 / len(valid_eps)) if valid_eps else None)
+        pe_ratio = round(latest_price / ttm_eps, 2) if (ttm_eps and ttm_eps > 0) else 0.0
+
+        pe_sparkline = [
+            {"time": p.date, "value": round(float(p.close) / ttm_eps, 2)}
+            for p in recent_prices
+        ] if (ttm_eps and ttm_eps > 0) else []
+
+        # 計算每股淨值 (BVPS) 與股價淨值比 (P/B)
+        latest_bs = db.query(models.BalanceSheet).filter_by(stock_id=stock_id)\
+                      .order_by(models.BalanceSheet.year.desc(), models.BalanceSheet.quarter.desc()).first()
+        mc_cache = db.query(models.MarketCapCache).filter_by(stock_id=stock_id).first()
+
+        pb_ratio = 0.0
+        pb_sparkline = []
+        if latest_bs and latest_bs.shareholders_equity and mc_cache and mc_cache.market_cap and latest_price > 0:
+            total_shares = (mc_cache.market_cap * 100_000_000) / latest_price
+            bvps = latest_bs.shareholders_equity / total_shares if total_shares > 0 else 0
+            if bvps > 0:
+                pb_ratio = round(latest_price / bvps, 2)
+                pb_sparkline = [{"time": p.date, "value": round(float(p.close) / bvps, 2)} for p in recent_prices]
+
+        # 計算現金殖利率 (近四季或近一年配息加總)
+        recent_divs = db.query(models.Dividend).filter_by(stock_id=stock_id)\
+                        .order_by(models.Dividend.date.desc()).limit(4).all()
+        total_cash_div = sum(d.cash for d in recent_divs if d.cash is not None)
+        dividend_yield = round((total_cash_div / latest_price) * 100, 2) if (total_cash_div > 0 and latest_price > 0) else 0.0
+
+        yield_sparkline = [
+            {"time": p.date, "value": round((total_cash_div / float(p.close)) * 100, 2)}
+            for p in recent_prices
+        ] if (total_cash_div > 0) else []
+
+        valuation = {
+            "price": latest_price,
+            "peRatio": pe_ratio,
+            "pbRatio": pb_ratio,
+            "dividendYield": dividend_yield,
+            "sparklineData": sparkline_data,
+            "peSparkline": pe_sparkline,
+            "pbSparkline": pb_sparkline,
+            "yieldSparkline": yield_sparkline
+        }
+
+        return {
+            "status": "success",
+            "source": "database",
+            "data": valuation
+        }
+
+    # 2. 本地若無股價資料，回退請求 FinMind API
+    from .services.finmind import FinMindClient
     client = FinMindClient()
     try:
         end_date = datetime.now().strftime("%Y-%m-%d")
-        # Fetch 1 year of data to show meaningful long-term trends for valuation metrics
         start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-        
-        # 1. 獲取本益比等估值資料
         per_data = await client.fetch_per(stock_id, start_date, end_date)
-        
-        # 2. 獲取股價走勢
         price_data = await client.fetch_price(stock_id, start_date, end_date)
         
         if not per_data or not price_data:
@@ -444,8 +556,6 @@ async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
             
         latest_per = per_data[-1]
         latest_price = price_data[-1]
-        
-        # 組合走勢圖資料
         recent_prices = price_data[-250:] if len(price_data) > 250 else price_data
         recent_per = per_data[-250:] if len(per_data) > 250 else per_data
 
@@ -472,7 +582,14 @@ async def read_stock_valuation(stock_id: str, db: Session = Depends(get_db)):
         }
     except Exception as e:
         print(f"Error fetching valuation for {stock_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch valuation data")
+        return {
+            "status": "success",
+            "source": "fallback_empty",
+            "data": {
+                "price": 0, "peRatio": 0, "pbRatio": 0, "dividendYield": 0,
+                "sparklineData": [], "peSparkline": [], "pbSparkline": [], "yieldSparkline": []
+            }
+        }
     finally:
         await client.close()
 
@@ -1070,16 +1187,20 @@ async def delete_stock_data_api(stock_id: str, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 @app.get("/api/v1/stock/{stock_id}/quote")
-async def read_stock_quote(stock_id: str):
+async def read_stock_quote(stock_id: str, db: Session = Depends(get_db)):
     from .services.shioaji_service import shioaji_client
+    from . import models
     import asyncio
     
-    # Try Shioaji first
-    quote = await asyncio.to_thread(lambda: shioaji_client.get_quote(stock_id))
-    if quote:
-        return {"status": "success", "source": "shioaji", "data": quote}
+    # 1. 嘗試 Shioaji 即時報價
+    try:
+        quote = await asyncio.to_thread(lambda: shioaji_client.get_quote(stock_id))
+        if quote and quote.get("close", 0) > 0:
+            return {"status": "success", "source": "shioaji", "data": quote}
+    except Exception:
+        pass
         
-    # Fallback to yfinance if Shioaji is not available
+    # 2. 嘗試 yfinance 報價
     import yfinance as yf
     try:
         ticker = yf.Ticker(f"{stock_id}.TW")
@@ -1089,26 +1210,56 @@ async def read_stock_quote(stock_id: str):
             info = await asyncio.to_thread(lambda: ticker.info)
             
         close_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose", 0)
-        prev_close = info.get("previousClose", close_price)
-        change = close_price - prev_close
-        change_pct = (change / prev_close * 100) if prev_close else 0
+        if close_price and close_price > 0:
+            prev_close = info.get("previousClose", close_price)
+            change = close_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+            
+            quote_data = {
+                "stock_id": stock_id,
+                "name": info.get("shortName", stock_id),
+                "open": info.get("regularMarketOpen", close_price),
+                "high": info.get("dayHigh", close_price),
+                "low": info.get("dayLow", close_price),
+                "close": close_price,
+                "volume": info.get("regularMarketVolume", 0),
+                "amount": info.get("regularMarketVolume", 0) * close_price,
+                "yesterday_close": prev_close,
+                "change": round(change, 2),
+                "change_percent": round(change_pct, 2)
+            }
+            return {"status": "success", "source": "yfinance_fallback", "data": quote_data}
+    except Exception:
+        pass
+
+    # 3. 兜底回退：從本地資料庫 stock_prices_daily 取得最新真實收盤價
+    recent_prices = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id)\
+                      .order_by(models.StockPriceDaily.date.desc()).limit(2).all()
+    if recent_prices:
+        latest_p = recent_prices[0]
+        prev_p = recent_prices[1] if len(recent_prices) > 1 else recent_prices[0]
+        change = (latest_p.close - prev_p.close) if (latest_p.close and prev_p.close) else 0.0
+        change_pct = ((change / prev_p.close) * 100) if (prev_p.close and prev_p.close > 0) else 0.0
+        
+        target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+        name = target_stock.name if target_stock else stock_id
         
         quote_data = {
             "stock_id": stock_id,
-            "name": info.get("shortName", stock_id),
-            "open": info.get("regularMarketOpen", 0),
-            "high": info.get("dayHigh", 0),
-            "low": info.get("dayLow", 0),
-            "close": close_price,
-            "volume": info.get("regularMarketVolume", 0),
-            "amount": info.get("regularMarketVolume", 0) * close_price,
-            "yesterday_close": prev_close,
+            "name": name,
+            "open": latest_p.open or latest_p.close,
+            "high": latest_p.high or latest_p.close,
+            "low": latest_p.low or latest_p.close,
+            "close": latest_p.close,
+            "volume": latest_p.volume or 0,
+            "amount": (latest_p.volume or 0) * (latest_p.close or 0),
+            "yesterday_close": prev_p.close,
             "change": round(change, 2),
             "change_percent": round(change_pct, 2)
         }
-        return {"status": "success", "source": "yfinance_fallback", "data": quote_data}
-    except Exception as e:
-        return {"status": "error", "message": str(e), "data": None}
+        return {"status": "success", "source": "database_fallback", "data": quote_data}
+
+    return {"status": "error", "message": "No quote data available", "data": None}
 
 @app.get("/api/v1/stock/{stock_id}/intraday")
 async def read_stock_intraday(
@@ -1185,4 +1336,10 @@ async def trigger_single_market_cap_sync(stock_id: str, db: Session = Depends(ge
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
+
+
+# Mount Goldman Sachs gs-quant routes
+app.include_router(gs_quant_routes.router, prefix="/api/v1/gs_quant")
+app.include_router(gs_quant_routes.router, prefix="/api/gs_quant")
+app.include_router(gs_quant_routes.router, prefix="/gs_quant")
 

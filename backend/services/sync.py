@@ -5,42 +5,42 @@ from .. import models
 from . import finance, market
 
 def get_staleness_status(db: Session, stock_id: str):
-    """Checks if the data for a given stock is stale and needs updating."""
+    """Checks if the data for a given stock is stale and needs updating, inspecting actual DB row counts."""
     metadata = db.query(models.SyncMetadata).filter_by(stock_id=stock_id).all()
     meta_dict = {m.data_type: m for m in metadata}
     
     stale_types = []
     now = datetime.now()
     
-    # Check Price (Daily, updated after 16:00)
+    # 1. 檢查實體資料表筆數（若筆數不足，直接標記過期需補齊，避免假性「最新」）
+    price_count = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id).count()
+    chips_count = db.query(models.ChipsDaily).filter_by(stock_id=stock_id).count()
+    fin_count = db.query(models.FinancialStatement).filter_by(stock_id=stock_id).count()
+
+    if price_count < 60:
+        stale_types.append("price")
+    if chips_count < 30:
+        stale_types.append("chips")
+    if fin_count < 4:
+        stale_types.append("finance")
+
+    # 2. Check Price (Daily, updated after 16:00)
     price_meta = meta_dict.get("price")
-    should_update_daily = False
-    
     if now.hour >= 16:
-        # After 16:00, we expect today's data
         expected_date = now.strftime("%Y-%m-%d")
     else:
-        # Before 16:00, we expect yesterday's data
         expected_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         
     if not price_meta or not price_meta.last_data_date or price_meta.last_data_date < expected_date:
-        # Also, check if expected dates are weekends (naive check, real market open days require a calendar)
-        # We will assume if it's less than expected date and 2 days passed, or simply flag it.
-        # To avoid being too complex, if last updated timestamp was not today, we might be stale.
         if not price_meta or not price_meta.last_updated or (now.timestamp() - price_meta.last_updated) > 86400:
-             # Just a simple heuristic: if it wasn't updated in the last 24h, it might need updating
              stale_types.append("price")
              stale_types.append("chips")
              
-    # Check Finance (Quarterly)
+    # 3. Check Finance (Quarterly)
     finance_meta = meta_dict.get("finance")
     if not finance_meta:
         stale_types.append("finance")
     else:
-        # e.g., last_data_date might be "2023-Q3"
-        # Since checking exact quarters can be tricky, let's use last_updated timestamp
-        # Suggest updating if we haven't updated in 7 days, or if we pass a reporting deadline.
-        # A simple check: update once a month or if missing.
         if (now.timestamp() - finance_meta.last_updated) > 30 * 86400:
              stale_types.append("finance")
 

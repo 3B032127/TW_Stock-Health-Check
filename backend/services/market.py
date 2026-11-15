@@ -12,8 +12,8 @@ async def get_chips_data(db: Session, stock_id: str, days: int = 30, force_sync:
         models.ChipsDaily.stock_id == stock_id
     ).order_by(models.ChipsDaily.date.asc()).all()
 
-    # If we are not forcing sync and already have DB data, return DB data
-    if not force_sync and len(db_items) > 0:
+    # 只要資料庫已有充足籌碼資料 (>= 30 筆) 且非強制同步，直接優先返回 DB 資料，零 API 消耗
+    if not force_sync and len(db_items) >= 30:
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         filtered = [i for i in db_items if i.date >= start_date]
         return "db", filtered if filtered else db_items[-days:]
@@ -23,13 +23,16 @@ async def get_chips_data(db: Session, stock_id: str, days: int = 30, force_sync:
     start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
 
     # 2. Fetch from API
-    client = FinMindClient()
-    data_list = await client.fetch_chips(stock_id, start_date, end_date)
-    await client.close()
+    data_list = []
+    try:
+        client = FinMindClient()
+        data_list = await client.fetch_chips(stock_id, start_date, end_date)
+        await client.close()
+    except Exception as e:
+        print(f"Error fetching chips for {stock_id}: {e}")
 
     if not data_list:
-        return "api", db_items
-
+        return "db" if db_items else "empty", db_items
 
     # 3. Insert/Update
     grouped_by_date = {}
@@ -76,7 +79,8 @@ async def get_stock_price(db: Session, stock_id: str, days: int = 180, force_syn
         models.StockPriceDaily.stock_id == stock_id
     ).order_by(models.StockPriceDaily.date.asc()).all()
     
-    if not force_sync and len(db_items) > 0:
+    # 只要資料庫已有充足歷史股價 (>= 60 筆) 且非強制同步，直接優先返回 DB 資料，零 API 消耗
+    if not force_sync and len(db_items) >= 60:
         ui_start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         filtered = [i for i in db_items if i.date >= ui_start_date]
         return "db", filtered if filtered else db_items[-days:]
@@ -85,37 +89,65 @@ async def get_stock_price(db: Session, stock_id: str, days: int = 180, force_syn
     fetch_days = 365 * 5 if force_sync else max(days + 30, 365)
     start_date = (datetime.now() - timedelta(days=fetch_days)).strftime("%Y-%m-%d")
         
-    client = FinMindClient()
-    data_list = await client.fetch_price(stock_id, start_date, end_date)
-    await client.close()
-    
-    if not data_list: return "api", db_items
-    
-    for d in data_list:
-        existing = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id, date=d['date']).first()
-        if not existing:
-            item = models.StockPriceDaily(
-                stock_id=stock_id,
-                date=d['date'],
-                open=d['open'],
-                high=d['max'],
-                low=d['min'],
-                close=d['close'],
-                volume=d['Trading_Volume']
-            )
-            db.add(item)
-            
+    data_list = []
     try:
-        db.commit()
-    except:
-        db.rollback()
+        client = FinMindClient()
+        data_list = await client.fetch_price(stock_id, start_date, end_date)
+        await client.close()
+    except Exception as e:
+        print(f"Error fetching FinMind price for {stock_id}: {e}")
+    
+    if data_list:
+        for d in data_list:
+            existing = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id, date=d['date']).first()
+            if not existing:
+                item = models.StockPriceDaily(
+                    stock_id=stock_id,
+                    date=d['date'],
+                    open=d['open'],
+                    high=d['max'],
+                    low=d['min'],
+                    close=d['close'],
+                    volume=d['Trading_Volume']
+                )
+                db.add(item)
+        try:
+            db.commit()
+        except:
+            db.rollback()
+    else:
+        # Fallback to yfinance: 當 FinMind 額度用盡或無資料時，無縫切換 yfinance 補齊 5 年股價歷史
+        try:
+            import yfinance as yf
+            for suffix in [".TW", ".TWO"]:
+                ticker_sym = f"{stock_id}{suffix}"
+                df = yf.Ticker(ticker_sym).history(period="5y")
+                if df is not None and not df.empty:
+                    for idx, row in df.iterrows():
+                        date_str = idx.strftime("%Y-%m-%d")
+                        existing = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id, date=date_str).first()
+                        if not existing:
+                            item = models.StockPriceDaily(
+                                stock_id=stock_id,
+                                date=date_str,
+                                open=float(row['Open']),
+                                high=float(row['High']),
+                                low=float(row['Low']),
+                                close=float(row['Close']),
+                                volume=int(row['Volume'])
+                            )
+                            db.add(item)
+                    db.commit()
+                    break
+        except Exception as yf_err:
+            print(f"yfinance price fallback failed for {stock_id}: {yf_err}")
         
     final_items = db.query(models.StockPriceDaily).filter(
         models.StockPriceDaily.stock_id == stock_id
     ).order_by(models.StockPriceDaily.date.asc()).all()
     
     ui_start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    return "api", [i for i in final_items if i.date >= ui_start_date]
+    return "api" if len(final_items) > len(db_items) else "db", [i for i in final_items if i.date >= ui_start_date]
 
 async def get_dividend_data(db: Session, stock_id: str, force_sync: bool = False):
     db_items = db.query(models.Dividend).filter_by(stock_id=stock_id).order_by(models.Dividend.year.desc()).all()

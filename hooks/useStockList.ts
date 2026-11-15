@@ -14,8 +14,11 @@ export function useStockList() {
         queryKey: ['stockList'],
         queryFn: async (): Promise<StockInfo[]> => {
             const result = await api.getStockList();
-            if (result.status === 'success' && result.data) {
-                return result.data.filter((s: any) => s.type === 'twse' || s.type === 'tpex');
+            if (result.status === 'success' && Array.isArray(result.data)) {
+                return result.data.filter((s: any) => {
+                    const t = (s.type || s.market || '').toLowerCase();
+                    return !t || t === 'twse' || t === 'tpex' || t === 'emerging';
+                });
             }
             return [];
         },

@@ -155,7 +155,7 @@ class YahooStockCrawler:
     
     async def _get_chinese_stock_name(self, stock_id: str) -> Optional[str]:
         """
-        從 Yahoo TW 股市個股頁面獲取中文公司名稱
+        優先從本地資料庫取得股票中文名稱，若無則從 Yahoo TW 獲取
         
         Args:
             stock_id: 股票代碼
@@ -163,6 +163,19 @@ class YahooStockCrawler:
         Returns:
             股票中文名稱
         """
+        try:
+            from ..database import SessionLocal
+            from .. import models
+            _db = SessionLocal()
+            try:
+                stk = _db.query(models.Stock).filter_by(stock_id=stock_id).first()
+                if stk and stk.name:
+                    return stk.name
+            finally:
+                _db.close()
+        except Exception:
+            pass
+
         try:
             # 嘗試 .TW
             url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW"
@@ -339,32 +352,51 @@ class YahooStockCrawler:
                 else:
                     calculated_capital = f"{capital_val / 10000:,.0f} 萬"
 
-            # 取得月營收
-            finmind = FinMindClient()
-            now = datetime.now()
-            start_date = (now - relativedelta(months=14)).strftime("%Y-%m-%d")
-            end_date = now.strftime("%Y-%m-%d")
-            
-            revenue_data = []
-            try:
-                # Assuming this executes inside an async function
-                revenue_data = await finmind.fetch_month_revenue(stock_id, start_date, end_date)
-            except Exception as e:
-                print(f"Fetch revenue error: {e}")
-            finally:
-                await finmind.close()
-
+            # 優先從本地資料庫財報計算營收數據，確保秒開且零 API 消耗
             monthly_revenue = {'value': 'N/A', 'yoy': 0}
-            if revenue_data:
-                latest_revenue = revenue_data[-1]
-                rev_value = latest_revenue.get('revenue', 0)
-                if rev_value > 0:
-                    monthly_revenue['value'] = f"{rev_value / 100000000:,.2f}"
+            try:
+                from ..database import SessionLocal
+                from .. import models
+                _db = SessionLocal()
+                try:
+                    latest_stmts = _db.query(models.FinancialStatement).filter_by(stock_id=stock_id)\
+                                      .order_by(models.FinancialStatement.year.desc(), models.FinancialStatement.quarter.desc()).limit(5).all()
+                    if latest_stmts and latest_stmts[0].revenue:
+                        latest_is = latest_stmts[0]
+                        monthly_revenue['value'] = f"{latest_is.revenue / 100000000:,.2f}"
+                        prev_is = next((r for r in latest_stmts if r.year == latest_is.year - 1 and r.quarter == latest_is.quarter), None)
+                        if prev_is and prev_is.revenue and prev_is.revenue > 0:
+                            monthly_revenue['yoy'] = round(((latest_is.revenue - prev_is.revenue) / prev_is.revenue) * 100, 2)
+                finally:
+                    _db.close()
+            except Exception:
+                pass
 
-                if len(revenue_data) > 1:
-                    last_year_rev = next((r.get('revenue') for r in revenue_data if r.get('revenue_year') == latest_revenue.get('revenue_year', 0) - 1 and r.get('revenue_month') == latest_revenue.get('revenue_month')), None)
-                    if last_year_rev and last_year_rev > 0:
-                        monthly_revenue['yoy'] = round(((rev_value - last_year_rev) / last_year_rev) * 100, 2)
+            # 若本地資料庫無資料，回退請求 FinMind (僅在前台未冷卻時)
+            if monthly_revenue['value'] == 'N/A':
+                from .finmind import token_manager
+                now = datetime.now()
+                token_info = token_manager.get_token(for_background_sync=False)
+                # 只有在 Token 未冷卻時才嘗試
+                if token_info and token_info.get("exhausted_until", 0) <= now.timestamp():
+                    finmind = FinMindClient()
+                    start_date = (now - relativedelta(months=14)).strftime("%Y-%m-%d")
+                    end_date = now.strftime("%Y-%m-%d")
+                    try:
+                        revenue_data = await finmind.fetch_month_revenue(stock_id, start_date, end_date)
+                        if revenue_data:
+                            latest_revenue = revenue_data[-1]
+                            rev_value = latest_revenue.get('revenue', 0)
+                            if rev_value > 0:
+                                monthly_revenue['value'] = f"{rev_value / 100000000:,.2f}"
+                            if len(revenue_data) > 1:
+                                last_year_rev = next((r.get('revenue') for r in revenue_data if r.get('revenue_year') == latest_revenue.get('revenue_year', 0) - 1 and r.get('revenue_month') == latest_revenue.get('revenue_month')), None)
+                                if last_year_rev and last_year_rev > 0:
+                                    monthly_revenue['yoy'] = round(((rev_value - last_year_rev) / last_year_rev) * 100, 2)
+                    except Exception as e:
+                        print(f"Fetch revenue error: {e}")
+                    finally:
+                        await finmind.close()
             
             # 取得 EPS 與三率 (轉換為百分比格式)
             eps = info.get('trailingEps', 'N/A')

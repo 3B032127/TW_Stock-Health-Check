@@ -23,15 +23,15 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
         // 1. Deduplicate stocks by stock_id (some stocks have multiple entries for different types)
         const uniqueStocksMap = new Map();
         for (const stock of stocks) {
-            if (!uniqueStocksMap.has(stock.stock_id)) {
+            if (stock && stock.stock_id && !uniqueStocksMap.has(stock.stock_id)) {
                 uniqueStocksMap.set(stock.stock_id, stock);
             }
         }
         const uniqueStocks = Array.from(uniqueStocksMap.values());
 
         // 2. Exact match check
-        const exactIdMatch = uniqueStocks.find(stock => stock.stock_id.toLowerCase().trim() === lowerQuery);
-        const exactNameMatch = uniqueStocks.find(stock => stock.stock_name.toLowerCase().trim() === lowerQuery);
+        const exactIdMatch = uniqueStocks.find(stock => (stock.stock_id || '').toLowerCase().trim() === lowerQuery);
+        const exactNameMatch = uniqueStocks.find(stock => (stock.stock_name || '').toLowerCase().trim() === lowerQuery);
 
         if (exactIdMatch) {
             return [exactIdMatch];
@@ -45,8 +45,8 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
         const includesMatches: typeof stocks = [];
 
         for (const stock of uniqueStocks) {
-            const id = stock.stock_id.toLowerCase().trim();
-            const name = stock.stock_name.toLowerCase().trim();
+            const id = (stock.stock_id || '').toLowerCase().trim();
+            const name = (stock.stock_name || '').toLowerCase().trim();
 
             if (id.startsWith(lowerQuery)) {
                 startsWithId.push(stock);
@@ -58,8 +58,8 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
         }
 
         // Sort each category internally to ensure shortest/most relevant is first
-        startsWithId.sort((a, b) => a.stock_id.length - b.stock_id.length || a.stock_id.localeCompare(b.stock_id));
-        startsWithName.sort((a, b) => a.stock_name.length - b.stock_name.length || a.stock_name.localeCompare(b.stock_name));
+        startsWithId.sort((a, b) => (a.stock_id || '').length - (b.stock_id || '').length || (a.stock_id || '').localeCompare(b.stock_id || ''));
+        startsWithName.sort((a, b) => (a.stock_name || '').length - (b.stock_name || '').length || (a.stock_name || '').localeCompare(b.stock_name || ''));
 
         // Combine all, prioritizing prefix matches, then infix matches
         return [...startsWithId, ...startsWithName, ...includesMatches].slice(0, 10);
@@ -79,6 +79,18 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
     }, []);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (isFocused && selectedIndex >= 0 && selectedIndex < filteredStocks.length) {
+                handleSelect(filteredStocks[selectedIndex].stock_id);
+            } else if (isFocused && filteredStocks.length > 0) {
+                handleSelect(filteredStocks[0].stock_id);
+            } else if (/^\d{4,6}$/.test(query.trim())) {
+                handleSelect(query.trim());
+            }
+            return;
+        }
+
         if (!isFocused || filteredStocks.length === 0) return;
 
         if (e.key === 'ArrowDown') {
@@ -87,13 +99,6 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (selectedIndex >= 0 && selectedIndex < filteredStocks.length) {
-                handleSelect(filteredStocks[selectedIndex].stock_id);
-            } else if (filteredStocks.length > 0) {
-                handleSelect(filteredStocks[0].stock_id);
-            }
         }
     };
 

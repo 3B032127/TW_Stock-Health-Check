@@ -166,17 +166,22 @@ def get_all_stocks_stats(db: Session) -> list:
     
     price_map = {p.stock_id: p.close for p in latest_prices}
 
+    # Pre-fetch all real stock names from stocks table
+    stock_names = {s[0]: s[1] for s in db.query(models.Stock.stock_id, models.Stock.name).all() if s[1]}
+
     results = []
     for stock_id in all_stock_ids:
+        real_name = stock_names.get(stock_id, f"股票 {stock_id}")
         if stock_id not in stocks_meta:
             data = {
                 "id": stock_id,
-                "name": f"股票 {stock_id}",
+                "name": real_name,
                 "lastSyncTime": 0,
                 "dataTypes": {}
             }
         else:
             data = stocks_meta[stock_id]
+            data["name"] = real_name
             
         data["records"] = {
             "financials": financial_counts.get(stock_id, 0),
