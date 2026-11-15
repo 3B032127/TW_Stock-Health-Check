@@ -214,7 +214,7 @@ async def get_cash_flow(db: Session, stock_id: str, year: int, quarter: int):
     return "api", None
 
 
-async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: int, model_class, map_func, dataset: str, force_sync: bool = False):
+async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: int, model_class, map_func, dataset: str, force_sync: bool = False, for_background_sync: bool = False):
     db_items = db.query(model_class).filter_by(stock_id=stock_id)\
                  .order_by(model_class.year.desc(), model_class.quarter.desc()).limit(limit).all()
     
@@ -222,13 +222,12 @@ async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: in
     if not force_sync and len(db_items) > 0:
         return "db", db_items
 
-    
     end_date = datetime.now().strftime("%Y-%m-%d")
     # Fetch past 10 years if forced, else 4 years
     years_to_fetch = 10 if force_sync else 4
     start_date = (datetime.now() - timedelta(days=365*years_to_fetch)).strftime("%Y-%m-%d")
     
-    client = FinMindClient()
+    client = FinMindClient(for_background_sync=for_background_sync)
     data_list = await client.fetch_data(dataset, stock_id, start_date, end_date)
     await client.close()
     
@@ -282,33 +281,21 @@ async def fetch_and_sync_financial_history(db: Session, stock_id: str, limit: in
     return source, final_items
 
 
-async def get_income_statement_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False):
-    return await fetch_and_sync_financial_history(db, stock_id, limit, models.FinancialStatement, map_income_statement, "TaiwanStockFinancialStatements", force_sync)
+async def get_income_statement_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False, for_background_sync: bool = False):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.FinancialStatement, map_income_statement, "TaiwanStockFinancialStatements", force_sync, for_background_sync=for_background_sync)
 
-async def get_balance_sheet_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False):
-    return await fetch_and_sync_financial_history(db, stock_id, limit, models.BalanceSheet, map_balance_sheet, "TaiwanStockBalanceSheet", force_sync)
+async def get_balance_sheet_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False, for_background_sync: bool = False):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.BalanceSheet, map_balance_sheet, "TaiwanStockBalanceSheet", force_sync, for_background_sync=for_background_sync)
 
-async def get_cash_flow_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False):
-    return await fetch_and_sync_financial_history(db, stock_id, limit, models.CashFlowStatement, map_cash_flow, "TaiwanStockCashFlowsStatement", force_sync)
+async def get_cash_flow_history(db: Session, stock_id: str, limit: int = 8, force_sync: bool = False, for_background_sync: bool = False):
+    return await fetch_and_sync_financial_history(db, stock_id, limit, models.CashFlowStatement, map_cash_flow, "TaiwanStockCashFlowsStatement", force_sync, for_background_sync=for_background_sync)
 
 async def calculate_health_check(db: Session, stock_id: str):
     global stock_list_cache
     
-    # Identify industry for sector-specific logic
-    target_industry = "其他"
-    if stock_list_cache is None:
-        client = FinMindClient()
-        try:
-            stock_list_cache = await client.fetch_stock_info()
-        except:
-            pass
-        finally:
-            await client.close()
-            
-    if stock_list_cache:
-        target_item = next((s for s in stock_list_cache if s['stock_id'] == stock_id), None)
-        if target_item:
-            target_industry = target_item.get('industry_category', '其他')
+    # Identify industry for sector-specific logic from local DB
+    target_stock = db.query(models.Stock).filter_by(stock_id=stock_id).first()
+    target_industry = target_stock.industry if target_stock and target_stock.industry else "其他"
 
     # Fetch quarters for metrics & charting
     source_is, is_history = await get_income_statement_history(db, stock_id, limit=20)
