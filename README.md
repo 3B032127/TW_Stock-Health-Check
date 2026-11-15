@@ -33,6 +33,65 @@
 ### 📉 經濟指標 (Economic Indicators)
 - 追蹤影響市場的總體經濟指標。
 
+### ⚡ 高盛量化分析 (Goldman Sachs gs-quant Engine)
+- **因子分析 (GS Factor)**：計算 Momentum (動量)、Value (價值)、Quality (品質)、Low Volatility (低波動)、Market Beta (市場風險) 與 Smart Money (法人籌碼) 六大風格因子曝險與雷達圖。
+- **策略回測 (GS Backtest)**：以 `gs_quant.timeseries` 引擎執行多因子、均線交叉、RSI 均值回歸與 MACD 動能策略回測，產出總報酬率、年化報酬率、夏普值 (Sharpe Ratio)、最大回撤 (Max Drawdown) 與資金淨值曲線圖。
+
+### 🔄 全自動數據補齊系統 (Data Sync Daemon)
+- 終端機 TUI 動態監控看板，單頁定點刷新不洗版。
+- 自動抓取全市場上市普通股歷史數據：財報 (40季)、股利 (10年)、股價 (5年免額度)、三大法人籌碼 (1年)。
+- 雙金鑰自動切換與智慧冷卻倒數，並保留前台網頁即時使用額度。
+
+## 🔄 自動化資料庫同步系統 (Automated Data Sync System)
+
+本專案內建強大的資料庫自動同步守護程式 (`sync_financials_daemon`) 與啟動腳本 (`sync_financials.sh`)，能夠全自動補齊台股全市場普通股的完整歷史資料，並具備智慧 API 額度控管與 TUI 終端機動態看板。
+
+### 🌟 核心特色
+1. **四維度歷史資料全量補齊**：
+   - **季報財報 (40 季 / 10 年)**：綜合損益表、資產負債表、現金流量表。
+   - **歷史股利 (10 年)**：歷年現金股利、股票股利與盈餘公積配息。
+   - **歷史股價 (5 年日 K 線)**：**優先透過 yfinance 抓取約 1,250 筆日線（零消耗 FinMind API 額度且極速入庫）**。
+   - **三大法人籌碼 (1 年日線)**：外資、投信、自營商買賣超張數。
+2. **細粒度 Smart Skip (智慧斷點續傳)**：
+   - 程式會實時比對資料庫實際筆數（財報 $\ge 8$ 季、股利 $\ge 3$ 年、股價 $\ge 250$ 天、籌碼 $\ge 60$ 天），已達標的維度自動秒略過，只抓取缺漏項目，節省時間與 API 額度。
+3. **智慧雙金鑰管理與防禦冷卻**：
+   - 自動調度 `FINMIND_TOKEN_1` 與 `FINMIND_TOKEN_2`，每小時總額度達 1,200 次。
+   - 自動扣留緩衝額度（每組 50 次，共 100~150 次）專供前台網站即時查詢，後台同步絕不影響使用者瀏覽。
+   - 當 API 額度吃緊時自動進入單頁定點倒數冷卻，重置後自動無縫恢復運作。
+4. **終端機動態儀表板 (TUI Dashboard)**：
+   - 採用備用螢幕緩衝區（Alternate Screen Buffer），固定單頁定點刷新，不滾動洗版。
+   - 實時呈現雙金鑰使用量、冷卻倒數以及 4 大維度的獨立百分比進度條。
+
+### 💻 執行指令與參數
+
+在專案目錄下直接執行啟動腳本：
+
+```bash
+# 1. 全自動智慧補齊模式 (推薦：全維度掃描，缺什麼補什麼，自動冷卻)
+./sync_financials.sh
+
+# 2. 極速補齊全市場 5 年歷史股價 (yfinance 免額度優先，約 5~8 分鐘即可完成上千檔)
+./sync_financials.sh --mode=price
+
+# 3. 專注補齊全市場 10 年歷史股利政策
+./sync_financials.sh --mode=dividend
+
+# 4. 專注補齊全市場三大法人籌碼買賣超
+./sync_financials.sh --mode=chips
+
+# 5. 專注補齊全市場 10 年季報財報三表
+./sync_financials.sh --mode=finance
+
+# 6. 純文字日誌模式 (適合背景 nohup 輸出或重導向至 log 檔)
+./sync_financials.sh --plain > sync.log 2>&1 &
+
+# 7. 限制同步檔數 (例如僅同步市值前 20 檔進行測試)
+./sync_financials.sh --limit=20
+```
+
+> [!TIP]
+> 守護程式支援安全的優雅退出（Graceful Shutdown），任何時候按下 `Ctrl + C` 均會安全寫入進度並離開，下次執行時自動接續中斷進度。
+
 ## 🛠️ 技術棧 (Tech Stack)
 - **前端框架**：[React](https://react.dev/) + [Vite](https://vitejs.dev/)
 - **程式語言**：[TypeScript](https://www.typescriptlang.org/)
