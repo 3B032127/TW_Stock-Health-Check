@@ -1,6 +1,5 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { api, API_BASE_URL } from '../services/api';
-import { loadMonitorLightData, getLatestMonitorData } from '../monitorLightData';
 import { getRefetchInterval, getStaleTime, getIndicatorRefetchInterval } from '../utils/tradingHours';
 import { Stock } from '../types';
 
@@ -35,11 +34,13 @@ export interface Indicator {
     name: string;
     value: string;
     change: string;
+    changePercent?: string;
     isUp: boolean;
     description?: string;
     note?: string;
     text?: string;
     isPositiveForMarket?: boolean;
+    sparkline?: number[];
 }
 
 // ─── useTaixData ─────────────────────────────────────────────────────
@@ -85,34 +86,10 @@ export function useIndicators() {
             const response = await fetch(`${API_BASE_URL}/market/indicators`);
             const result = await response.json();
 
-            let apiIndicators: Indicator[] = [];
             if (result.status === 'success' && result.data && result.data.indicators) {
-                apiIndicators = result.data.indicators;
+                return result.data.indicators;
             }
-
-            // Load monitor light from CSV
-            const monitorData = await loadMonitorLightData();
-            const latestMonitor = getLatestMonitorData(monitorData);
-
-            if (latestMonitor) {
-                const monitorIndicator: Indicator = {
-                    id: 'monitor_light',
-                    name: '景氣對策信號',
-                    value: `${latestMonitor.score.toFixed(0)}分`,
-                    change: `${latestMonitor.signal}燈`,
-                    isUp: latestMonitor.score >= 23,
-                    description: latestMonitor.score >= 32
-                        ? '景氣轉熱'
-                        : latestMonitor.score >= 23
-                            ? '景氣穩定'
-                            : '景氣轉冷',
-                };
-
-                const filteredApi = apiIndicators.filter((ind) => ind.id !== 'monitor_light');
-                return [...filteredApi, monitorIndicator];
-            }
-
-            return apiIndicators;
+            return [];
         },
         staleTime: getStaleTime(),
         refetchInterval: getIndicatorRefetchInterval(), // Separate logic for indicators (24/7)
@@ -215,5 +192,100 @@ export function useMarketRankings() {
         isFetching: query.isFetching,
         dataUpdatedAt: query.dataUpdatedAt,
         error: query.error as Error | null,
+    };
+}
+
+// ─── useADRMonitor ───────────────────────────────────────────────────
+
+export interface ADRQuote {
+    id: string;
+    name: string;
+    twId: string;
+    twName: string;
+    ratioLabel: string;
+    adrPrice: number;
+    change: number;
+    changePercent: number;
+    convertedTwd: number;
+    twSpotPrice: number;
+    premiumPercent: number;
+    sparkline: number[];
+}
+
+export interface ADRMonitorData {
+    usdTwd: number;
+    updatedAt: string;
+    items: ADRQuote[];
+}
+
+export function useADRMonitor() {
+    const query = useQuery({
+        queryKey: ['adrMonitor'],
+        queryFn: async (): Promise<ADRMonitorData> => {
+            const response = await fetch(`${API_BASE_URL}/market/adr`);
+            const result = await response.json();
+            if (result.status === 'success' && result.data) {
+                return result.data;
+            }
+            return { usdTwd: 32.5, updatedAt: '', items: [] };
+        },
+        staleTime: 30_000,
+        refetchInterval: 60_000,
+        placeholderData: keepPreviousData,
+    });
+
+    return {
+        adrData: query.data ?? { usdTwd: 32.5, updatedAt: '', items: [] },
+        isLoading: query.isLoading,
+        isFetching: query.isFetching,
+        dataUpdatedAt: query.dataUpdatedAt,
+    };
+}
+
+// ─── useGlobalRankings ───────────────────────────────────────────────
+
+export type RankingCategory = 'tw_core' | 'tw_all' | 'us' | 'jp' | 'semi';
+
+export interface RankingStock {
+    id: string;
+    symbol: string;
+    name: string;
+    market: 'TW' | 'US' | 'JP';
+    currencySymbol: string;
+    industry: string;
+    price: number;
+    change: number;
+    changePercent: number;
+    volume?: string;
+    isLimitUp?: boolean;
+    isLimitDown?: boolean;
+    sparkline: number[];
+}
+
+export function useGlobalRankings(category: RankingCategory, limit = 5) {
+    const query = useQuery({
+        queryKey: ['globalRankings', category, limit],
+        queryFn: async (): Promise<{ gainers: RankingStock[]; losers: RankingStock[] }> => {
+            const response = await fetch(`${API_BASE_URL}/market/global-rankings?category=${category}&limit=${limit}`);
+            const result = await response.json();
+            if (result.status === 'success' && result.data) {
+                return {
+                    gainers: result.data.gainers ?? [],
+                    losers: result.data.losers ?? [],
+                };
+            }
+            return { gainers: [], losers: [] };
+        },
+        staleTime: 30_000,
+        refetchInterval: 60_000,
+        placeholderData: keepPreviousData,
+    });
+
+    return {
+        gainers: query.data?.gainers ?? [],
+        losers: query.data?.losers ?? [],
+        isLoading: query.isLoading,
+        isFetching: query.isFetching,
+        dataUpdatedAt: query.dataUpdatedAt,
     };
 }

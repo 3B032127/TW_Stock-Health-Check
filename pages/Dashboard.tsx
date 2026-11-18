@@ -1,42 +1,86 @@
 import React, { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { Icon } from '../App';
-import { Stock } from '../types';
 import StockLoading from '../components/StockLoading';
-import { useTaixData, useIndicators, useMarketRankings, Indicator } from '../hooks/useMarketData';
+import {
+  useIndicators,
+  useIndicatorHistory,
+  useADRMonitor,
+  useGlobalRankings,
+  ADRQuote,
+  RankingCategory,
+  RankingStock,
+} from '../hooks/useMarketData';
+import GlobalIndexBoard from '../components/GlobalIndexBoard';
 import SyncIndicator from '../components/SyncIndicator';
 
+const UP = '#ef4444';
+const DOWN = '#22c55e';
 
-// Sparkline Component
+const MARKET_BADGE: Record<'TW' | 'US' | 'JP', { flag: string; cls: string }> = {
+  TW: { flag: 'TW', cls: 'bg-blue-500/15 text-blue-300 border-blue-500/30' },
+  US: { flag: 'US', cls: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' },
+  JP: { flag: 'JP', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+};
 
-interface SparklineProps {
-  data: any[];
-  color: string;
-}
+const RANKING_TABS: { id: 'tw' | 'us' | 'jp' | 'semi'; label: string }[] = [
+  { id: 'tw', label: '🇹🇼 台股主力' },
+  { id: 'us', label: '🇺🇸 美股科技 / 費半' },
+  { id: 'jp', label: '🇯🇵 日股核心 (日經 225)' },
+  { id: 'semi', label: '🌐 全球半導體鏈' },
+];
 
-const Sparkline: React.FC<SparklineProps> = ({ data, color }) => (
-  <div className="h-10 w-24">
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data}>
-        <defs>
-          <linearGradient id={`gradient-${color}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-            <stop offset="95%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <YAxis domain={['auto', 'auto']} hide />
-        <Area
-          type="monotone"
-          dataKey="value"
-          stroke={color}
-          fill={`url(#gradient-${color})`}
-          strokeWidth={2}
-          isAnimationActive={false}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-  </div>
-);
+const INDICATOR_ORDER: Record<string, number> = {
+  usdtwd: 1,
+  usdjpy: 2,
+  jp_rate: 3,
+  vix: 4,
+  us_nfp: 5,
+  us_yield: 6,
+  fed_rate: 7,
+  us_cpi: 8,
+};
+
+/** Pure SVG real-data Sparkline (avoids shared Recharts gradient ID collisions) */
+const RealSparkline: React.FC<{ data: number[]; color: string; width?: number; height?: number }> = ({
+  data,
+  color,
+  width = 84,
+  height = 36,
+}) => {
+  if (!data || data.length < 2) {
+    return (
+      <div
+        className="flex items-center justify-end text-[10px] text-slate-600 font-mono"
+        style={{ width, height }}
+      >
+        —
+      </div>
+    );
+  }
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const span = max - min || 1;
+  const pts = data
+    .map((v, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - 3 - ((v - min) / span) * (height - 6);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0 overflow-visible">
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+};
 
 interface IndicatorCardProps {
   id?: string;
@@ -46,162 +90,219 @@ interface IndicatorCardProps {
   isUp: boolean;
   description?: string;
   note?: string;
-  text?: string;
-  isPositiveForMarket?: boolean;
+  sparkline?: number[];
   onClick?: () => void;
-  historyData?: any[];
 }
 
-const IndicatorCard: React.FC<IndicatorCardProps> = ({
+const DashboardIndicatorCard: React.FC<IndicatorCardProps> = ({
+  id,
   title,
   value,
   change,
   isUp,
   description,
   note,
-  text,
-  isPositiveForMarket,
+  sparkline,
   onClick,
-  historyData
 }) => {
-  // Use passed history data or fallback to mock if absolutely necessary (though we prefer empty or real)
-  const chartData = React.useMemo(() => {
-    if (historyData && historyData.length > 0) {
-      // Map API history data (which might be { date: string, value: number }) to { value: number } for sparkline
-      return historyData.map(point => ({
-        value: typeof point === 'number' ? point : point.value
-      }));
-    }
-    // Fallback Mock (only if no history provided) - Use stable pseudo-random data to prevent re-render flickering
-    const baseValue = 50;
-    const trend = isUp ? 1 : -1;
-    // Simple pseudo-random using index to ensure exact same shape on every render
-    const pseudoRandom = (i: number) => ((i * 137) % 100) / 20;
-    return Array.from({ length: 10 }, (_, i) => ({
-      value: baseValue + (i * 3 * trend) + pseudoRandom(i)
-    }));
-  }, [isUp, historyData]);
+  // Prefer sparkline bundled in /market/indicators; query history only as backup if empty
+  const needBackupHistory = !sparkline || sparkline.length < 2;
+  const { history } = useIndicatorHistory(needBackupHistory ? id || '' : '', '1m');
+
+  const chartValues = React.useMemo(() => {
+    if (sparkline && sparkline.length >= 2) return sparkline;
+    if (history && history.length >= 2) return history.map((p) => p.value);
+    return [];
+  }, [sparkline, history]);
 
   return (
     <div
       onClick={onClick}
-      className={`card-premium flex flex-col p-6 rounded-xl transition-all ${onClick ? 'cursor-pointer hover:translate-y-[-2px] hover:shadow-premium' : ''}`}
+      className={`card-premium h-full flex flex-col justify-between p-5 rounded-xl transition-all ${
+        onClick ? 'cursor-pointer hover:translate-y-[-2px] hover:shadow-premium' : ''
+      }`}
     >
-      {/* Header with title and mini chart */}
-      <div className="flex items-start justify-between mb-4">
-        <p className="text-textMuted text-[10px] font-bold uppercase tracking-widest flex-1">{title}</p>
-        <div className="ml-2">
-          <Sparkline data={chartData} color={isUp ? '#ef4444' : '#22c55e'} />
+      <div>
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <p className="text-textMuted text-xs font-bold tracking-wider leading-snug flex-1">{title}</p>
+          <RealSparkline data={chartValues} color={isUp ? UP : DOWN} width={80} height={34} />
+        </div>
+
+        <div className="flex items-baseline justify-between gap-2 mb-3">
+          <p className="text-2xl font-black text-white font-mono-data tracking-tight truncate">{value}</p>
+          <div className={`flex items-center text-xs font-bold font-mono-data shrink-0 ${isUp ? 'text-up' : 'text-down'}`}>
+            <Icon name={isUp ? 'arrow_upward' : 'arrow_downward'} className="text-[14px] mr-0.5" />
+            <span>{change}</span>
+          </div>
         </div>
       </div>
 
-      {/* Value and change */}
-      <div className="flex items-end justify-between mb-4">
-        <p className="text-2xl font-black text-white font-mono-data tracking-tight">{value}</p>
-        <div className={`flex items-center text-sm font-bold font-mono-data ${isUp ? 'text-up' : 'text-down'}`}>
-          <Icon name={isUp ? 'arrow_upward' : 'arrow_downward'} className="text-[16px] mr-0.5" />
-          {change}
+      <div className="pt-3 border-t border-white/5 space-y-2">
+        <p className="text-[11px] text-slate-300 font-mono truncate" title={description}>
+          {description || '—'}
+        </p>
+        <div className="flex items-center gap-1.5 text-[11px] text-primary/85 font-medium">
+          <span className="text-xs shrink-0">💡</span>
+          <span className="truncate" title={note}>
+            {note || '客觀總經參考指標'}
+          </span>
         </div>
       </div>
-
-      {/* Additional metadata */}
-      {(description || note || text || isPositiveForMarket !== undefined) && (
-        <div className="pt-4 border-t border-white/5 space-y-3">
-          {description && (
-            <div className="flex items-start gap-2 text-[11px] text-textMuted leading-relaxed">
-              <span className="flex-1">{description}</span>
-            </div>
-          )}
-          {note && (
-            <div className="flex items-start gap-2 text-[11px] text-primary/80 font-medium">
-              <span className="text-xs">💡</span>
-              <span className="flex-1">{note}</span>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };
 
-// Wrapper to fetch history for sparkline
-import { useIndicatorHistory } from '../hooks/useMarketData';
+const ADRCard: React.FC<{ adr: ADRQuote; onNavigate: (id: string) => void }> = ({ adr, onNavigate }) => {
+  const usUp = adr.change >= 0;
+  const premUp = adr.premiumPercent >= 0;
+  return (
+    <div
+      onClick={() => onNavigate(adr.twId)}
+      className="bg-surface border border-surfaceLight hover:border-slate-500 rounded-xl p-4 flex flex-col justify-between gap-3 cursor-pointer transition-all hover:-translate-y-0.5"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-bold text-white truncate">{adr.name}</span>
+            <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-bold">
+              {adr.id}
+            </span>
+          </div>
+          <p className="text-[11px] text-textMuted mt-0.5 font-mono">
+            對應 {adr.twId} {adr.twName} ({adr.ratioLabel})
+          </p>
+        </div>
+        <RealSparkline data={adr.sparkline} color={usUp ? UP : DOWN} width={64} height={28} />
+      </div>
 
-const DashboardIndicatorCard: React.FC<IndicatorCardProps> = (props) => {
-  // Fetch only 1 month of history for the sparkline to show short-term trend
-  const { history } = useIndicatorHistory(props.id || '', '1m');
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xl font-black text-white font-mono-data">${adr.adrPrice.toFixed(2)}</span>
+        <span className={`text-xs font-bold font-mono-data ${usUp ? 'text-up' : 'text-down'}`}>
+          {usUp ? '+' : ''}
+          {adr.change.toFixed(2)} ({usUp ? '+' : ''}
+          {adr.changePercent.toFixed(2)}%)
+        </span>
+      </div>
 
-  return <IndicatorCard {...props} historyData={history} />;
+      <div className="pt-2.5 border-t border-white/5 flex items-center justify-between text-xs gap-2">
+        <div className="min-w-0">
+          <span className="text-textMuted text-[10px] block">換算台股價 (現貨 NT${adr.twSpotPrice.toFixed(1)})</span>
+          <span className="text-slate-100 font-bold font-mono">NT$ {adr.convertedTwd.toFixed(2)}</span>
+        </div>
+        <span
+          className={`px-2 py-1 rounded-md font-bold font-mono text-xs border shrink-0 ${
+            premUp
+              ? 'bg-up/15 text-up border-up/30'
+              : 'bg-down/15 text-down border-down/30'
+          }`}
+        >
+          {premUp ? '溢價 +' : '折價 '}
+          {adr.premiumPercent.toFixed(2)}%
+        </span>
+      </div>
+    </div>
+  );
 };
 
 interface StockTableProps {
   title: string;
-  stocks: Stock[];
+  stocks: RankingStock[];
   type: 'gainer' | 'loser';
+  isLoading?: boolean;
   onNavigate: (id: string) => void;
 }
 
-const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate }) => {
+const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, isLoading, onNavigate }) => {
   const isGainer = type === 'gainer';
   const colorClass = isGainer ? 'text-up' : 'text-down';
   const icon = isGainer ? 'trending_up' : 'trending_down';
-
-  // Mock sparkline data (stable generation to prevent re-render flickering)
-  const getMockData = (id: string) => {
-    // Generate simple stable hash from id string to seed the chart shape
-    const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return Array.from({ length: 10 }, (_, i) => ({
-      value: ((hash + i * 17) % 10) + (isGainer ? i : 10 - i)
-    }));
-  };
+  const sparkColor = isGainer ? UP : DOWN;
 
   return (
     <div className="card-premium flex flex-col rounded-2xl overflow-hidden">
-      <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center">
-        <h3 className="font-bold text-lg flex items-center gap-2">
+      <div className="px-6 py-5 border-b border-white/5 flex justify-between items-center">
+        <h3 className="font-bold text-lg flex items-center gap-2 text-white">
           <Icon name={icon} className={colorClass} />
           {title}
         </h3>
-        <button className="text-xs text-primary font-bold hover:text-white transition-colors uppercase tracking-widest">View All</button>
+        <span className="text-[11px] text-textMuted font-mono uppercase tracking-wider">Top 5</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-white/2 text-[10px] text-textMuted uppercase tracking-widest font-bold">
-              <th className="py-4 px-8">個股</th>
-              <th className="py-4 px-8 text-right">成交價</th>
-              <th className="py-4 px-8 text-right">漲跌幅</th>
-              <th className="py-4 px-8 w-24">走勢</th>
+              <th className="py-3.5 px-6">個股</th>
+              <th className="py-3.5 px-4 text-right">成交價</th>
+              <th className="py-3.5 px-4 text-right">漲跌幅</th>
+              <th className="py-3.5 px-6 text-right w-28">走勢</th>
             </tr>
           </thead>
           <tbody className="text-sm">
-            {stocks.map((stock) => (
-              <tr
-                key={stock.id}
-                onClick={() => onNavigate(stock.id)}
-                className="border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer last:border-0 group"
-              >
-                <td className="py-5 px-8">
-                  <p className="font-bold text-white group-hover:text-primary transition-colors">{stock.name}</p>
-                  <p className="text-[10px] text-textMuted font-mono-data">{stock.id}</p>
-                </td>
-                <td className="py-5 px-8 text-right font-black font-mono-data">
-                  <span className={`
-                    ${stock.isLimitUp ? 'bg-up/20 border border-up/40 px-2 py-1 rounded text-up' : ''}
-                    ${stock.isLimitDown ? 'bg-down/20 border border-down/40 px-2 py-1 rounded text-down' : ''}
-                    ${!stock.isLimitUp && !stock.isLimitDown ? 'text-white' : ''}
-                  `}>
-                    {stock.price.toFixed(2)}
-                  </span>
-                </td>
-                <td className={`py-5 px-8 text-right font-black font-mono-data ${colorClass}`}>
-                  {isGainer ? '+' : ''}{stock.changePercent.toFixed(2)}%
-                </td>
-                <td className="py-5 px-8">
-                  <Sparkline data={getMockData(stock.id)} color={isGainer ? '#ef4444' : '#22c55e'} />
+            {stocks.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="py-10 text-center text-textMuted text-xs">
+                  {isLoading ? '正在載入跨國排行榜報價...' : '暫無符合條件的排行資料'}
                 </td>
               </tr>
-            ))}
+            ) : (
+              stocks.map((stock) => {
+                const badge = MARKET_BADGE[stock.market];
+                const clickable = stock.market === 'TW';
+                const pctUp = stock.changePercent >= 0;
+                return (
+                  <tr
+                    key={`${stock.market}-${stock.id}`}
+                    onClick={() => clickable && onNavigate(stock.id)}
+                    className={`border-b border-white/5 transition-colors last:border-0 group ${
+                      clickable ? 'hover:bg-white/5 cursor-pointer' : 'hover:bg-white/3'
+                    }`}
+                  >
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${badge.cls}`}
+                        >
+                          {badge.flag}
+                        </span>
+                        <p className={`font-bold text-white ${clickable ? 'group-hover:text-primary' : ''} transition-colors`}>
+                          {stock.name}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[11px] text-textMuted font-mono-data">{stock.symbol}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-surfaceLight/80 text-slate-300 text-[10px]">
+                          {stock.industry}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 text-right font-black font-mono-data whitespace-nowrap">
+                      <span
+                        className={`
+                          ${stock.isLimitUp ? 'bg-up/20 border border-up/40 px-2 py-0.5 rounded text-up' : ''}
+                          ${stock.isLimitDown ? 'bg-down/20 border border-down/40 px-2 py-0.5 rounded text-down' : ''}
+                          ${!stock.isLimitUp && !stock.isLimitDown ? 'text-white' : ''}
+                        `}
+                      >
+                        <span className="text-textMuted text-[11px] font-normal mr-1">{stock.currencySymbol}</span>
+                        {stock.price.toLocaleString('zh-TW', {
+                          minimumFractionDigits: stock.market === 'JP' ? 0 : 2,
+                          maximumFractionDigits: stock.market === 'JP' ? 0 : 2,
+                        })}
+                      </span>
+                    </td>
+                    <td className={`py-4 px-4 text-right font-black font-mono-data whitespace-nowrap ${pctUp ? 'text-up' : 'text-down'}`}>
+                      {pctUp ? '+' : ''}
+                      {stock.changePercent.toFixed(2)}%
+                    </td>
+                    <td className="py-4 px-6">
+                      <div className="flex justify-end">
+                        <RealSparkline data={stock.sparkline} color={sparkColor} width={84} height={32} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -209,245 +310,177 @@ const StockTable: React.FC<StockTableProps> = ({ title, stocks, type, onNavigate
   );
 };
 
-const Dashboard = ({ onNavigateToStock, onNavigateToIndicator }: { onNavigateToStock: (id: string) => void, onNavigateToIndicator?: (id: string) => void }) => {
-  // State management
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('1d');
+const Dashboard = ({
+  onNavigateToStock,
+  onNavigateToIndicator,
+}: {
+  onNavigateToStock: (id: string) => void;
+  onNavigateToIndicator?: (id: string) => void;
+}) => {
+  const [boardUpdated, setBoardUpdated] = useState(0);
+  const [rankingGroup, setRankingGroup] = useState<'tw' | 'us' | 'jp' | 'semi'>('tw');
+  const [twScope, setTwScope] = useState<'tw_core' | 'tw_all'>('tw_core');
 
-  // Custom Hooks with SWR strategy
-  const {
-    taixData,
-    indexData,
-    isLoading: taixLoading,
-    isFetching: taixFetching,
-    dataUpdatedAt: taixUpdatedAt
-  } = useTaixData(selectedPeriod);
+  const activeRankingCategory: RankingCategory = rankingGroup === 'tw' ? twScope : rankingGroup;
 
   const {
     indicators,
     isLoading: indicatorsLoading,
     isFetching: indicatorsFetching,
-    dataUpdatedAt: indicatorsUpdatedAt
+    dataUpdatedAt: indicatorsUpdatedAt,
   } = useIndicators();
+
+  const {
+    adrData,
+    isFetching: adrFetching,
+    dataUpdatedAt: adrUpdatedAt,
+  } = useADRMonitor();
 
   const {
     gainers: topGainers,
     losers: topLosers,
     isLoading: rankingsLoading,
     isFetching: rankingsFetching,
-    dataUpdatedAt: rankingsUpdatedAt
-  } = useMarketRankings();
+    dataUpdatedAt: rankingsUpdatedAt,
+  } = useGlobalRankings(activeRankingCategory, 5);
 
-  const isLoading = taixLoading || indicatorsLoading || rankingsLoading;
-  const isFetching = taixFetching || indicatorsFetching || rankingsFetching;
+  const isLoading = indicatorsLoading;
+  const isFetching = indicatorsFetching || adrFetching || rankingsFetching;
 
-  // Calculate latest update time
   const lastUpdated = Math.max(
-    taixUpdatedAt || 0,
+    boardUpdated || 0,
     indicatorsUpdatedAt || 0,
+    adrUpdatedAt || 0,
     rankingsUpdatedAt || 0
   );
 
-  const isInitialLoading = (!taixData && taixLoading) || (!indicators.length && indicatorsLoading) || (!topGainers.length && rankingsLoading);
-
-  // Show loading animation during initial data fetch
+  const isInitialLoading = !indicators.length && indicatorsLoading;
   if (isInitialLoading) {
     return <StockLoading />;
   }
 
+  const orderedIndicators = indicators
+    .filter((ind) => ind.id && INDICATOR_ORDER[ind.id] !== undefined)
+    .sort((a, b) => (INDICATOR_ORDER[a.id || ''] || 999) - (INDICATOR_ORDER[b.id || ''] || 999));
+
   return (
     <div className="space-y-8 animate-fade-in relative">
-      {/* Background Fetch Indicator */}
       <SyncIndicator isFetching={isFetching && !isLoading} lastUpdated={lastUpdated} />
-      {/* Index Section */}
-      <div className="rounded-xl bg-surface border border-surfaceLight shadow-sm overflow-hidden">
-        <div className="flex flex-col lg:flex-row">
-          <div className="flex flex-col p-6 lg:p-8 lg:w-1/3 border-b lg:border-b-0 lg:border-r border-surfaceLight gap-6 justify-center">
-            <div>
-              <h1 className="text-3xl font-black tracking-tight mb-1 text-white">台股加權指數</h1>
-              <p className="text-textMuted text-sm font-medium">臺灣證券交易所發行量加權股價指數</p>
-            </div>
-            <div>
-              <div className="flex items-baseline gap-3">
-                <span className={`text-4xl lg:text-5xl font-bold tracking-tight ${taixData && taixData.current.change >= 0 ? 'text-up' : 'text-down'}`}>
-                  {taixData ? taixData.current.price.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '--'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 mt-2">
-                {taixData && (
-                  <span className={`flex items-center ${taixData.current.change >= 0 ? 'text-up bg-up/10 border-up/20' : 'text-down bg-down/10 border-down/20'} px-2 py-1 rounded text-sm font-bold border`}>
-                    <Icon name={taixData.current.change >= 0 ? 'arrow_upward' : 'arrow_downward'} className="text-[16px] mr-1" />
-                    {taixData.current.change >= 0 ? '+' : ''}{taixData.current.change.toFixed(2)} ({taixData.current.change >= 0 ? '+' : ''}{taixData.current.changePercent.toFixed(2)}%)
-                  </span>
-                )}
-                <span className="text-textMuted text-sm">{taixData ? taixData.current.date : '今日'}</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4 mt-2">
-              <div>
-                <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">成交金額</p>
-                <p className="text-lg font-bold text-white">
-                  {taixData && taixData.current.turnover && taixData.current.turnover > 0
-                    ? `${(taixData.current.turnover / 100000000).toFixed(0)} 億`
-                    : 'N/A'}
-                </p>
-                {taixData && taixData.current.volume > 0 && (
-                  <p className="text-xs text-textMuted">
-                    成交量: {(taixData.current.volume / 100000000).toFixed(2)} 億張
-                  </p>
-                )}
-              </div>
-              <div>
-                <p className="text-textMuted text-xs uppercase tracking-wider font-semibold">當日區間</p>
-                <p className="text-lg font-bold text-white whitespace-nowrap">
-                  {taixData ? `${taixData.current.low.toLocaleString('zh-TW', { maximumFractionDigits: 0 })} - ${taixData.current.high.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}` : '--'}
-                </p>
-              </div>
-            </div>
-          </div>
 
-          <div className="flex-1 p-6 relative min-h-[300px] flex flex-col">
-            <div className="flex justify-end gap-2 mb-4">
-              {[{ label: '1日', value: '1d' }, { label: '1週', value: '1w' }, { label: '1月', value: '1m' }, { label: '1年', value: '1y' }].map((period) => (
-                <button
-                  key={period.value}
-                  onClick={() => setSelectedPeriod(period.value)}
-                  className={`px-3 py-1 text-xs font-bold rounded-full transition-all ${selectedPeriod === period.value ? 'bg-primary text-white shadow-sm' : 'bg-surfaceLight text-textMuted hover:bg-slate-600 hover:text-white'}`}
-                >
-                  {period.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex-1 w-full relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={indexData}>
-                  <defs>
-                    <linearGradient id="colorIndexUp" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorIndexDown" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="date"
-                    stroke="#6b7280"
-                    tick={{ fill: '#9ca3af', fontSize: 11 }}
-                    tickFormatter={(value) => {
-                      // Format based on selected period
-                      if (selectedPeriod === '1d') {
-                        // Show time only (HH:MM)
-                        return value.split(' ')[1] || value;
-                      } else if (selectedPeriod === '1w') {
-                        // Show month/day (MM/DD)
-                        const parts = value.split('-');
-                        return parts.length >= 3 ? `${parts[1]}/${parts[2].split(' ')[0]}` : value;
-                      } else if (selectedPeriod === '1m') {
-                        // Show month/day (MM/DD)
-                        const parts = value.split('-');
-                        return parts.length >= 3 ? `${parts[1]}/${parts[2]}` : value;
-                      } else {
-                        // 1y: Show year/month (YYYY/MM)
-                        const parts = value.split('-');
-                        return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : value;
-                      }
-                    }}
-                    interval="preserveStartEnd"
-                    minTickGap={50}
-                  />
-                  <YAxis
-                    stroke="#6b7280"
-                    tick={{ fill: '#9ca3af', fontSize: 11 }}
-                    domain={['auto', 'auto']}
-                    hide
-                  />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        return (
-                          <div className="bg-surface border border-surfaceLight rounded-lg px-3 py-2 shadow-lg">
-                            <p className="text-textMuted text-xs mb-1">{payload[0].payload.date}</p>
-                            <p className="text-white font-bold text-sm">
-                              {payload[0].value.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke={taixData && taixData.current.change >= 0 ? '#ef4444' : '#22c55e'}
-                    fillOpacity={1}
-                    fill={taixData && taixData.current.change >= 0 ? 'url(#colorIndexUp)' : 'url(#colorIndexDown)'}
-                    strokeWidth={2.5}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+      {/* Global Index Board (TW / US / JP) */}
+      <GlobalIndexBoard onUpdated={setBoardUpdated} />
+
+      {/* 8 Objective Macroeconomic Indicators (2x4 Grid) */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Icon name="monitoring" className="text-primary" />
+            <h2 className="text-xl font-bold text-white">關鍵經濟指標</h2>
           </div>
+          <span className="text-xs text-textMuted">涵蓋台/美/日匯率、日債殖利率、VIX 恐慌指數與美國就業/利率/通膨</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+          {orderedIndicators.map((ind, i) => (
+            <DashboardIndicatorCard
+              key={ind.id || i}
+              id={ind.id}
+              title={ind.name}
+              value={ind.value}
+              change={ind.change}
+              isUp={ind.isUp}
+              description={ind.description}
+              note={ind.note}
+              sparkline={ind.sparkline}
+              onClick={() => ind.id && onNavigateToIndicator?.(ind.id)}
+            />
+          ))}
         </div>
       </div>
 
-      {/* Indicators Grid */}
+      {/* Taiwan ADR International Premium Monitor */}
       <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-2 px-1">
-          <Icon name="monitoring" className="text-primary" />
-          <h2 className="text-xl font-bold text-white">關鍵經濟指標</h2>
+        <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Icon name="currency_exchange" className="text-primary" />
+            <h2 className="text-xl font-bold text-white">台股 ADR 國際溢價監控</h2>
+          </div>
+          <span className="text-xs text-textMuted font-mono">
+            換算匯率 USD/TWD：{adrData.usdTwd.toFixed(2)} ｜ 溢價為紅 / 折價為綠
+          </span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {indicators
-            .filter(ind => ind.id !== 'TAIEX' && !ind.name.includes('加權指數'))
-            .sort((a, b) => {
-              // Define category order
-              const categoryOrder: Record<string, number> = {
-                // Taiwan market indicators
-                'usdtwd': 1,
-                'monitor_light': 2,
-                // Semiconductor related
-                'sox': 3,
-                'tsmc_outlook': 4,
-                // US market indicators
-                'us_yield': 5,
-                'fed_rate': 6,
-                // US economic data
-                'us_cpi': 7,
-                'us_ppi': 8,
-              };
-
-              const orderA = categoryOrder[a.id || ''] || 999;
-              const orderB = categoryOrder[b.id || ''] || 999;
-
-              return orderA - orderB;
-            })
-            .map((ind, i) => (
-              <DashboardIndicatorCard
-                key={ind.id || i}
-                id={ind.id}
-                title={ind.name}
-                value={ind.value}
-                change={ind.change}
-                isUp={ind.isUp}
-                description={ind.description}
-                note={ind.note}
-                text={ind.text}
-                isPositiveForMarket={ind.isPositiveForMarket}
-                onClick={() => ind.id && onNavigateToIndicator?.(ind.id)}
-              />
-            ))}
+          {adrData.items.map((adr) => (
+            <ADRCard key={adr.id} adr={adr} onNavigate={onNavigateToStock} />
+          ))}
+          {adrData.items.length === 0 && (
+            <div className="col-span-full bg-surface border border-surfaceLight rounded-xl p-6 text-center text-sm text-textMuted">
+              台股 ADR 即時報價載入中...
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Multi-Market Rankings with Category Pill Tabs */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Icon name="leaderboard" className="text-primary" />
+            <h2 className="text-xl font-bold text-white mr-2">跨國漲跌幅排行榜</h2>
+            {RANKING_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setRankingGroup(tab.id)}
+                className={`px-3.5 py-1.5 text-xs font-bold rounded-full transition-all border ${
+                  rankingGroup === tab.id
+                    ? 'bg-primary text-white border-primary shadow-sm'
+                    : 'bg-surfaceLight/70 text-textMuted border-surfaceLight hover:bg-slate-600 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-      {/* Rankings Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <StockTable title="漲幅排行榜" stocks={topGainers.slice(0, 5)} type="gainer" onNavigate={onNavigateToStock} />
-        <StockTable title="跌幅排行榜" stocks={topLosers.slice(0, 5)} type="loser" onNavigate={onNavigateToStock} />
+          {rankingGroup === 'tw' && (
+            <div className="flex items-center gap-1.5 bg-surface border border-surfaceLight rounded-full p-1 self-start lg:self-auto">
+              <button
+                onClick={() => setTwScope('tw_core')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
+                  twScope === 'tw_core' ? 'bg-indigo-600 text-white' : 'text-textMuted hover:text-white'
+                }`}
+              >
+                主力權值 Top 100
+              </button>
+              <button
+                onClick={() => setTwScope('tw_all')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${
+                  twScope === 'tw_all' ? 'bg-indigo-600 text-white' : 'text-textMuted hover:text-white'
+                }`}
+              >
+                全部台股
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <StockTable
+            title="漲幅排行榜"
+            stocks={topGainers}
+            type="gainer"
+            isLoading={rankingsLoading}
+            onNavigate={onNavigateToStock}
+          />
+          <StockTable
+            title="跌幅排行榜"
+            stocks={topLosers}
+            type="loser"
+            isLoading={rankingsLoading}
+            onNavigate={onNavigateToStock}
+          />
+        </div>
       </div>
-    </div >
+    </div>
   );
 };
 

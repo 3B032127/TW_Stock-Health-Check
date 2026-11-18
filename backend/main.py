@@ -996,7 +996,10 @@ def read_market_indicators(db: Session = Depends(get_db)):
     # 嘗試讀取快取
     cached = cache_service.get_cached_response(db, "market", "indicators")
     if cached:
-        return cached
+        cached_inds = cached.get("data", {}).get("indicators", [])
+        cached_ids = {i.get("id") for i in cached_inds}
+        if {"vix", "jp_rate", "us_nfp"}.issubset(cached_ids) and all(i.get("sparkline") for i in cached_inds if i.get("id") != "taiex"):
+            return cached
 
     from .services.indicators import get_indicators_service
     import os
@@ -1018,6 +1021,45 @@ def read_market_indicators(db: Session = Depends(get_db)):
         cache_service.set_cached_response(db, "market", "indicators", res)
     return res
 
+
+
+@app.get("/api/v1/market/global-indices")
+def read_global_indices():
+    """Summary (price, change, sparkline, market status) of TW/US/JP core indices"""
+    from .services.global_indices import list_indices
+    return {"status": "success", "source": "yfinance", "data": {"indices": list_indices()}}
+
+
+@app.get("/api/v1/market/global-indices/{index_id}")
+def read_global_index(index_id: str, period: str = Query(default="1d", pattern="^(1d|1w|1m|1y)$")):
+    """Detail + chart data of a single global index (1d returns trading-session x offsets)"""
+    from .services.global_indices import get_index, INDEX_CONFIG
+    if index_id not in INDEX_CONFIG:
+        raise HTTPException(status_code=404, detail="Unknown index")
+    data = get_index(index_id, period)
+    if not data:
+        raise HTTPException(status_code=502, detail="Index data unavailable")
+    return {"status": "success", "source": "yfinance", "data": data}
+
+
+@app.get("/api/v1/market/adr")
+def read_adr_monitor(db: Session = Depends(get_db)):
+    """Taiwan ADR international premium/discount monitor (TSM, ASX, UMC, CHT)"""
+    from .services.global_rankings import get_adr_monitor
+    data = get_adr_monitor(db)
+    return {"status": "success", "source": "yfinance+sqlite", "data": data}
+
+
+@app.get("/api/v1/market/global-rankings")
+def read_global_rankings(
+    category: str = Query(default="tw_core", pattern="^(tw_core|tw_all|us|jp|semi)$"),
+    limit: int = Query(default=5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    """Multi-market Top Gainers & Losers rankings (TW Core/All, US Tech, JP Nikkei 225, Global Semi)"""
+    from .services.global_rankings import get_global_rankings
+    data = get_global_rankings(category=category, limit=limit, db=db)
+    return {"status": "success", "source": "yfinance+sqlite", "data": data}
 
 
 @app.get("/api/v1/market/taiex")

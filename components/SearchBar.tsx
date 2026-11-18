@@ -120,7 +120,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onNavigateToStock }) => {
                 <input
                     ref={inputRef}
                     type="text"
-                    placeholder={isLoading ? "載入股票清單中..." : "搜尋股票代碼或名稱 (例如: 2330)"}
+                    placeholder={isLoading ? "載入股票清單中..." : "搜尋台/美/日股代碼或名稱 (例如: 2330, NVDA, 8035.T)"}
                     className="w-full bg-transparent border-none text-sm text-white placeholder-textMuted focus:ring-0 ml-2 outline-none h-full"
                     value={query}
                     onChange={(e) => {
