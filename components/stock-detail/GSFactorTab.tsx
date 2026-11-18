@@ -20,7 +20,6 @@ import {
 import { Icon } from '../../App';
 import { useGSFactor } from '../../hooks/useGSFactor';
 import { useCompanyProfile } from '../../hooks/useCompanyProfile';
-import { AIAnalysisCard } from '../AIAnalysisCard';
 
 type RollingMetricKey = 'zscore_20d' | 'volatility_20d' | 'rsi_14' | 'beta_60d';
 
@@ -30,6 +29,36 @@ const ROLLING_METRICS: { key: RollingMetricKey; label: string; unit: string; col
   { key: 'rsi_14', label: 'GS RSI(14) 強弱', unit: '', color: '#a855f7', ref: 50 },
   { key: 'beta_60d', label: '60日滾動 Beta', unit: '', color: '#10b981', ref: 1 },
 ];
+
+/**
+ * Reusable InfoTooltip component displaying friendly plain-text explanations.
+ */
+export const InfoTooltip: React.FC<{ text: string }> = ({ text }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative inline-flex items-center ml-1 group">
+      <button
+        type="button"
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setShow((prev) => !prev);
+        }}
+        className="size-3.5 rounded-full bg-slate-700/80 hover:bg-slate-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] font-bold cursor-help transition-colors"
+        aria-label="指標說明"
+      >
+        ?
+      </button>
+      {show && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-[#0f172a] border border-slate-700 text-slate-200 text-xs rounded-xl shadow-2xl z-50 pointer-events-none whitespace-normal leading-relaxed text-left">
+          {text}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#0f172a]" />
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
   const { data, isLoading, error, refetch, isFetching } = useGSFactor(stockId);
@@ -109,15 +138,18 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
 
         <div className="flex items-center gap-4 self-end lg:self-auto">
           <div className="flex flex-col items-end">
-            <span className="text-[11px] text-textMuted font-medium">綜合量化評分</span>
+            <div className="flex items-center">
+              <span className="text-[11px] text-textMuted font-medium">綜合量化評分</span>
+              <InfoTooltip text="綜合評估這檔股票的「上漲衝勁、估值便宜度、公司獲利體質、股價穩定度與法人籌碼」算出的總體健康分數。60 分以上代表整體偏多。" />
+            </div>
             <div className="flex items-baseline gap-1">
               <span
                 className={`text-3xl font-black font-mono ${
-                  data.composite_score >= 70
-                    ? 'text-emerald-400'
-                    : data.composite_score >= 50
+                  data.composite_score >= 60
+                    ? 'text-rose-400'
+                    : data.composite_score >= 45
                     ? 'text-cyan-400'
-                    : 'text-amber-400'
+                    : 'text-emerald-400'
                 }`}
               >
                 {data.composite_score}
@@ -136,48 +168,74 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
         </div>
       </div>
 
+      {/* AI Quantitative Plain-Language Diagnosis Card */}
+      {data.ai_diagnosis && (
+        <div className="bg-blue-950/25 border border-blue-500/30 rounded-xl p-4 flex items-start gap-3.5 shadow-sm">
+          <div className="size-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+            <Icon name="lightbulb" className="text-xl" />
+          </div>
+          <div className="flex-1">
+            <div className="text-xs text-blue-400 font-bold uppercase tracking-wider mb-1">
+              AI 量化專家白話文診斷
+            </div>
+            <p className="text-sm text-slate-200 leading-relaxed font-medium">
+              {data.ai_diagnosis}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Econometric Risk Metrics Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
         {[
           {
             label: '20日年化波動率',
+            tooltip: '【雲霄飛車指數】衡量股價平常上沖下洗的劇烈程度。一般穩健大型股約在 15%~25%；若超過 50% 代表股性極度活潑（妖股等級），投資時切勿重倉或使用融資槓桿。',
             value: `${rm.annualized_volatility_20d.toFixed(1)}%`,
             sub: `60日: ${rm.annualized_volatility_60d.toFixed(1)}%`,
             tone: rm.annualized_volatility_20d > 40 ? 'text-amber-400' : 'text-white',
           },
           {
             label: '60日夏普比率',
+            tooltip: '【投資 CP 值】計算你每承受 1 分的波動風險，能換回多少分的超額報酬。大於 1.0 代表表現良好，大於 2.0 代表處於「高報酬、高效率」的強勢主升段。',
             value: rm.sharpe_ratio_60d.toFixed(2),
             sub: `252日: ${rm.sharpe_ratio_252d.toFixed(2)}`,
-            tone: rm.sharpe_ratio_60d >= 1 ? 'text-emerald-400' : rm.sharpe_ratio_60d < 0 ? 'text-rose-400' : 'text-white',
+            tone: rm.sharpe_ratio_60d >= 1 ? 'text-rose-400' : rm.sharpe_ratio_60d < 0 ? 'text-emerald-400' : 'text-white',
           },
           {
             label: '一年期最大回撤',
+            tooltip: '【歷史最慘腰斬紀錄】過去一年內，若不幸買在最高點並抱到最低點，帳面資產最多會縮水幾 %。用來做買進前的心理壓力測試。',
             value: `${rm.max_drawdown_252d.toFixed(1)}%`,
             sub: 'Max Drawdown',
-            tone: rm.max_drawdown_252d < -25 ? 'text-rose-400' : 'text-amber-300',
+            tone: rm.max_drawdown_252d < -25 ? 'text-emerald-400' : 'text-amber-300',
           },
           {
             label: '60日市場 Beta',
+            tooltip: '【大盤連動度】Beta > 1 代表股價波動比大盤更兇（大盤漲 1%，它平均漲超過 1%）；相關性 ρ (0~1) 代表它有多常跟著大盤同漲同跌，數值越低代表越常走自己的獨立行情。',
             value: rm.beta_60d.toFixed(2),
             sub: `相關性 ρ=${rm.correlation_taiex_60d.toFixed(2)}`,
             tone: rm.beta_60d > 1.2 ? 'text-cyan-400' : 'text-white',
           },
           {
             label: 'GS RSI(14) 動能',
+            tooltip: '【市場買氣溫度計】數值介於 0~100。超過 70 為「超買區」，代表短線買盤過熱、隨時可能拉回修正，不宜盲目追高；低於 30 為「超賣區」，代表短線跌深可能反彈。',
             value: rm.rsi_14.toFixed(1),
             sub: rm.rsi_14 >= 70 ? '超買區間' : rm.rsi_14 <= 30 ? '超賣區間' : '常態區間',
-            tone: rm.rsi_14 >= 70 ? 'text-up' : rm.rsi_14 <= 30 ? 'text-down' : 'text-white',
+            tone: rm.rsi_14 >= 70 ? 'text-rose-400' : rm.rsi_14 <= 30 ? 'text-emerald-400' : 'text-white',
           },
           {
             label: '60日股價 Z-Score',
+            tooltip: '【股價乖離雷達】衡量目前股價偏離 60 日平均線幾個標準差。大於 +2.0σ 代表短線嚴重超漲、乖離過大；小於 -2.0σ 代表嚴重超跌，可能醞釀均值回歸反彈。',
             value: `${rm.price_zscore_60d >= 0 ? '+' : ''}${rm.price_zscore_60d.toFixed(2)}σ`,
             sub: `年百分位 PR ${rm.price_percentile_252d.toFixed(0)}`,
-            tone: Math.abs(rm.price_zscore_60d) > 1.5 ? 'text-amber-400' : 'text-cyan-400',
+            tone: rm.price_zscore_60d >= 1.5 ? 'text-rose-400' : rm.price_zscore_60d <= -1.5 ? 'text-emerald-400' : 'text-cyan-400',
           },
         ].map((kpi, idx) => (
           <div key={idx} className="bg-surface border border-surfaceLight rounded-xl p-4 flex flex-col justify-between">
-            <span className="text-xs text-textMuted font-medium">{kpi.label}</span>
+            <div className="flex items-center">
+              <span className="text-xs text-textMuted font-medium">{kpi.label}</span>
+              <InfoTooltip text={kpi.tooltip} />
+            </div>
             <span className={`text-2xl font-black font-mono my-1 ${kpi.tone}`}>{kpi.value}</span>
             <span className="text-[11px] text-slate-400 font-mono">{kpi.sub}</span>
           </div>
@@ -189,9 +247,20 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
         {/* Left: 6-Factor Radar Chart */}
         <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-white font-bold text-base flex items-center gap-2">
+            <h3 className="text-white font-bold text-base flex items-center gap-1">
               <Icon name="radar" className="text-cyan-400" />
-              六大風格因子綜合評分雷達圖
+              <span>六大風格因子綜合評分雷達圖</span>
+              <InfoTooltip
+                text={
+                  '六大多因子曝險說明：\n' +
+                  '• 動能因子：股價短中期創高衝勁\n' +
+                  '• 價值因子：相較同業或歷史估值是否便宜（PE/PB 低、殖利率高）\n' +
+                  '• 品質因子：公司賺錢體質與毛利/ROE 穩定度\n' +
+                  '• 低波動因子：走勢是否穩健溫吞（抗跌力）\n' +
+                  '• 市場 Beta：跟隨大盤起舞程度\n' +
+                  '• 法人籌碼：三大法人近期真金白銀大舉買進強度'
+                }
+              />
             </h3>
             <span className="text-xs text-textMuted">分數區間 0 ~ 100</span>
           </div>
@@ -211,9 +280,9 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
                 <Radar
                   name="因子得分"
                   dataKey="score"
-                  stroke="#22d3ee"
-                  fill="#0ea5e9"
-                  fillOpacity={0.35}
+                  stroke="#ef4444"
+                  fill="#ef4444"
+                  fillOpacity={0.25}
                   strokeWidth={2.5}
                 />
               </RadarChart>
@@ -224,9 +293,10 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
         {/* Right: Factor Z-Score Exposure Horizontal Bar */}
         <div className="bg-surface border border-surfaceLight rounded-xl p-6 flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-white font-bold text-base flex items-center gap-2">
+            <h3 className="text-white font-bold text-base flex items-center gap-1">
               <Icon name="equalizer" className="text-primary" />
-              標準化因子曝險強度 (Z-Score)
+              <span>標準化因子曝險強度 (Z-Score)</span>
+              <InfoTooltip text="衡量目前股票在各風格因子相較同業或歷史基準偏離幾個標準差 (+σ 為正向偏多/紅，-σ 為負向偏空/綠，中性/藍)。" />
             </h3>
             <span className="text-xs text-textMuted font-mono">[-3.0σ, +3.0σ]</span>
           </div>
@@ -243,12 +313,11 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
                   formatter={(value: any) => [`${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(3)} σ`, '因子曝險']}
                 />
                 <Bar dataKey="exposure" barSize={20} radius={[4, 4, 4, 4]}>
-                  {barData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.exposure >= 0.5 ? '#10b981' : entry.exposure <= -0.5 ? '#f43f5e' : '#3b82f6'}
-                    />
-                  ))}
+                  {barData.map((entry, index) => {
+                    // Taiwan Equity color convention: Positive (+) is Red, Negative (-) is Green, Neutral is Blue
+                    const barColor = entry.exposure >= 0.3 ? '#ef4444' : entry.exposure <= -0.3 ? '#10b981' : '#3b82f6';
+                    return <Cell key={`cell-${index}`} fill={barColor} />;
+                  })}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -263,7 +332,7 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
             <Icon name="table_chart" className="text-blue-400" />
             gs-quant 多因子曝險明細與模型詮釋
           </h3>
-          <span className="text-xs text-textMuted">曝險值為標準常態 Z-Score，正值代表該風格偏向強於歷史常模</span>
+          <span className="text-xs text-textMuted">曝險值為標準常態 Z-Score，紅多綠空，依台股配色慣例呈現</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -278,14 +347,15 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
             </thead>
             <tbody className="divide-y divide-surfaceLight/50 text-sm">
               {data.factors_detail.map((f) => {
-                const isBull = f.exposure >= 0.5;
-                const isBear = f.exposure <= -0.5;
+                // Taiwan stock convention: Positive = Red/Coral, Negative = Green, Neutral = Blue
+                const isBull = f.exposure >= 0.3;
+                const isBear = f.exposure <= -0.3;
                 return (
                   <tr key={f.id} className="hover:bg-surfaceLight/20 transition-colors">
                     <td className="py-3.5 px-5 font-bold text-white whitespace-nowrap">{f.name}</td>
                     <td
                       className={`py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap ${
-                        isBull ? 'text-emerald-400' : isBear ? 'text-rose-400' : 'text-blue-300'
+                        isBull ? 'text-rose-400' : isBear ? 'text-emerald-400' : 'text-blue-300'
                       }`}
                     >
                       {f.exposure >= 0 ? '+' : ''}
@@ -296,7 +366,7 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
                         <div className="flex-1 h-2 bg-surfaceLight rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full ${
-                              isBull ? 'bg-emerald-500' : isBear ? 'bg-rose-500' : 'bg-blue-500'
+                              isBull ? 'bg-rose-500' : isBear ? 'bg-emerald-500' : 'bg-blue-500'
                             }`}
                             style={{ width: `${Math.max(4, Math.min(100, f.percentile))}%` }}
                           />
@@ -308,9 +378,9 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
                       <span
                         className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
                           isBull
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            : isBear
                             ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            : isBear
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                             : 'bg-blue-500/10 text-blue-300 border-blue-500/30'
                         }`}
                       >
@@ -379,34 +449,15 @@ export const GSFactorTab: React.FC<{ stockId: string }> = ({ stockId }) => {
               />
               <Area
                 type="monotone"
-                dataKey={selectedMetric}
+                dataKey={activeRollingCfg.key}
                 stroke={activeRollingCfg.color}
-                strokeWidth={2}
                 fill="url(#gsRollingGrad)"
+                strokeWidth={2}
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
-
-      {/* Automated Quantitative Summary */}
-      <AIAnalysisCard
-        type="health"
-        title="gs-quant 因子曝險量化診斷"
-        defaultExpanded={true}
-        onAnalyze={async () => {
-          const topFactor = [...data.factors_detail].sort((a, b) => b.exposure - a.exposure)[0];
-          const weakFactor = [...data.factors_detail].sort((a, b) => a.exposure - b.exposure)[0];
-          return (
-            `### Goldman Sachs gs-quant 因子風格診斷報告\n` +
-            `**${profile?.name || ''} (${stockId})** 截至 **${data.date}** 之量化綜合體質評分為 **${data.composite_score} 分**，模型定位為「**${data.quant_quadrant}**」。\n\n` +
-            `* **最強正向因子**：**${topFactor.name}**（曝險 **${topFactor.exposure >= 0 ? '+' : ''}${topFactor.exposure.toFixed(2)}σ**，PR ${topFactor.percentile.toFixed(0)}%），${topFactor.description}。\n` +
-            `* **相對弱勢因子**：**${weakFactor.name}**（曝險 **${weakFactor.exposure >= 0 ? '+' : ''}${weakFactor.exposure.toFixed(2)}σ**），顯示該維度相對歷史基準處於保守或高溢價區間。\n` +
-            `* **風險與波動特徵**：20 日年化波動率為 **${rm.annualized_volatility_20d.toFixed(1)}%**，近 60 日夏普比率為 **${rm.sharpe_ratio_60d.toFixed(2)}**，過去一年最大回撤幅度為 **${rm.max_drawdown_252d.toFixed(1)}%**，市場 Beta 為 **${rm.beta_60d.toFixed(2)}**。\n` +
-            `* **價格統計位階**：目前 60 日 Z-Score 為 **${rm.price_zscore_60d >= 0 ? '+' : ''}${rm.price_zscore_60d.toFixed(2)}σ**（過去一年百分位 PR ${rm.price_percentile_252d.toFixed(0)}），${Math.abs(rm.price_zscore_60d) > 1.8 ? '價格偏離均值較大，須留意短線均值回歸波動。' : '處於統計常態波動帶內，可搭配策略回測頁面驗證進出場勝率。'}`
-          );
-        }}
-      />
     </div>
   );
 };

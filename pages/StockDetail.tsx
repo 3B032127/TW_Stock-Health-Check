@@ -21,6 +21,7 @@ import { useHealthCheck } from '../hooks/useHealthCheck';
 import { useCompanyNews } from '../hooks/useCompanyNews';
 import { useOwnershipData } from '../hooks/useOwnershipData';
 import { usePeerComparison } from '../hooks/usePeerComparison';
+import { useQuote } from '../hooks/useQuote';
 
 const StockDetail: React.FC<{ 
   stockId: string, 
@@ -40,6 +41,7 @@ const StockDetail: React.FC<{
   const { isLoading: isNewsLoading } = useCompanyNews(stockId);
   const { isLoading: isOwnershipLoading } = useOwnershipData(stockId);
   const { isLoading: isPeerLoading } = usePeerComparison(stockId);
+  const { data: quote } = useQuote(stockId);
 
   // Consider the page ready only when all critical components are loaded
   // IMPORTANT: For new stocks, we wait for the background sync to finish as well
@@ -150,6 +152,60 @@ const StockDetail: React.FC<{
             </button>
           ))}
         </nav>
+      </div>
+
+      {/* Sticky Stock Context Header */}
+      <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-2.5 bg-[#1a1d26]/95 backdrop-blur-md border-b border-surfaceLight shadow-md flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs sm:text-sm font-medium text-textMuted">
+          <span
+            className="hover:text-primary cursor-pointer transition-colors"
+            onClick={onNavigateToMarket}
+          >
+            台股市場
+          </span>
+          <Icon name="chevron_right" className="text-xs text-slate-500" />
+          <span className="px-2 py-0.5 rounded bg-surfaceLight text-slate-200 font-bold text-xs">
+            {profile?.industry || '產業分類'}
+          </span>
+          <Icon name="chevron_right" className="text-xs text-slate-500" />
+          <span className="text-white font-bold text-sm sm:text-base">
+            {profile?.name || stockId} ({stockId})
+          </span>
+        </div>
+
+        <div className="flex items-center gap-4 sm:gap-6 font-mono">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs text-textMuted font-sans">最新收盤價</span>
+            <span className="text-lg sm:text-xl font-black text-white">
+              NT$ {quote && quote.close != null && !isNaN(Number(quote.close)) ? Number(quote.close).toFixed(2) : '--'}
+            </span>
+          </div>
+          {quote && (
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`text-xs sm:text-sm font-bold flex items-center ${
+                  Number(quote.change) >= 0 || quote.change == null ? 'text-up' : 'text-down'
+                }`}
+              >
+                {(Number(quote.change) || 0) >= 0 ? '▲' : '▼'} {Math.abs(Number(quote.change) || 0).toFixed(2)}
+              </span>
+              <span
+                className={`text-xs sm:text-sm font-bold ${
+                  (Number(quote.change_percent) || 0) >= 0 ? 'text-up' : 'text-down'
+                }`}
+              >
+                ({(Number(quote.change_percent) || 0) >= 0 ? '+' : ''}
+                {(Number(quote.change_percent) || 0).toFixed(2)}%)
+              </span>
+            </div>
+          )}
+          <div className="hidden md:flex items-center gap-1 text-[11px] text-textMuted font-sans">
+            <span>資料基準日：</span>
+            <span className="text-slate-300 font-mono">
+              {syncStatus?.last_updated ? String(syncStatus.last_updated).slice(0, 10) : new Date().toISOString().slice(0, 10)}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Content Switch */}

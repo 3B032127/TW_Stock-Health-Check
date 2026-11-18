@@ -183,7 +183,72 @@ def _build_fundamental_factors(
     close_series: pd.Series,
     ma_60: pd.Series,
 ) -> Dict[str, Any]:
-    """Derive Value and Quality factor Z-scores from SQLite financial & valuation tables."""
+    """Derive Value and Quality factor Z-scores standardized against industry peers & historical distribution."""
+    stock_info = db.query(models.Stock).filter_by(stock_id=ticker).first()
+    industry = stock_info.industry if stock_info else None
+
+    # Query top 5 peers in the same industry by market cap
+    peer_ids: List[str] = []
+    if industry:
+        peer_rows = (
+            db.query(models.Stock.stock_id)
+            .join(models.MarketCapCache, models.Stock.stock_id == models.MarketCapCache.stock_id, isouter=True)
+            .filter(models.Stock.industry == industry, models.Stock.stock_id != ticker)
+            .order_by(models.MarketCapCache.market_cap.desc().nullslast())
+            .limit(5)
+            .all()
+        )
+        peer_ids = [r[0] for r in peer_rows]
+
+    # Gather peer latest fundamentals for cross-sectional distribution
+    peer_gm_vals: List[float] = []
+    peer_roe_vals: List[float] = []
+    peer_pe_vals: List[float] = []
+    peer_pb_vals: List[float] = []
+    peer_dy_vals: List[float] = []
+
+    for pid in peer_ids:
+        p_stmt = (
+            db.query(models.FinancialStatement)
+            .filter_by(stock_id=pid)
+            .order_by(models.FinancialStatement.year.desc(), models.FinancialStatement.quarter.desc())
+            .first()
+        )
+        p_bal = (
+            db.query(models.BalanceSheet)
+            .filter_by(stock_id=pid)
+            .order_by(models.BalanceSheet.year.desc(), models.BalanceSheet.quarter.desc())
+            .first()
+        )
+        p_mc = db.query(models.MarketCapCache).filter_by(stock_id=pid).first()
+        p_divs = db.query(models.Dividend).filter_by(stock_id=pid).all()
+
+        p_last_px = (
+            db.query(models.StockPriceDaily.close)
+            .filter_by(stock_id=pid)
+            .order_by(models.StockPriceDaily.date.desc())
+            .first()
+        )
+        p_close = float(p_last_px[0]) if p_last_px and p_last_px[0] else None
+
+        if p_stmt and p_stmt.revenue and p_stmt.revenue > 0 and p_stmt.gross_profit is not None:
+            peer_gm_vals.append((p_stmt.gross_profit / p_stmt.revenue) * 100.0)
+        if p_stmt and p_bal and p_bal.shareholders_equity and p_bal.shareholders_equity > 0 and p_stmt.net_income:
+            peer_roe_vals.append((p_stmt.net_income * 4.0 / p_bal.shareholders_equity) * 100.0)
+        if p_mc and p_mc.market_cap and p_mc.market_cap > 0 and p_stmt and p_stmt.net_income and p_stmt.net_income > 0:
+            ann_ni = (p_stmt.net_income * 4.0) / 1e8
+            if ann_ni > 0:
+                peer_pe_vals.append(p_mc.market_cap / ann_ni)
+        if p_mc and p_mc.market_cap and p_mc.market_cap > 0 and p_bal and p_bal.shareholders_equity and p_bal.shareholders_equity > 0:
+            peer_pb_vals.append((p_mc.market_cap * 1e8) / p_bal.shareholders_equity)
+        if p_divs and p_close and p_close > 0:
+            recent_years = sorted(list(set(d.year for d in p_divs if d.year)), reverse=True)
+            if recent_years:
+                yr_cash = sum(float(d.cash or 0.0) for d in p_divs if d.year == recent_years[0])
+                if yr_cash > 0:
+                    peer_dy_vals.append((yr_cash / p_close) * 100.0)
+
+    # Statements of target stock
     latest_stmt = (
         db.query(models.FinancialStatement)
         .filter_by(stock_id=ticker)
@@ -209,7 +274,8 @@ def _build_fundamental_factors(
         .first()
     )
     mc_row = db.query(models.MarketCapCache).filter_by(stock_id=ticker).first()
-    # Sum cash dividends for the latest dividend year (handles quarterly payers like 2330 accurately)
+
+    # Cash dividend calculation
     latest_div_year_row = (
         db.query(models.Dividend.year)
         .filter_by(stock_id=ticker)
@@ -221,7 +287,6 @@ def _build_fundamental_factors(
         yr = latest_div_year_row[0]
         yr_divs = db.query(models.Dividend).filter_by(stock_id=ticker, year=yr).all()
         annual_cash_div = sum(float(d.cash or 0.0) for d in yr_divs)
-        # If the newest year only has 1 payout so far for a quarterly dividend payer, use prior full year
         if len(yr_divs) <= 2:
             prev_divs = db.query(models.Dividend).filter_by(stock_id=ticker, year=yr - 1).all()
             if len(prev_divs) >= 3:
@@ -230,68 +295,121 @@ def _build_fundamental_factors(
     latest_close = float(close_series.iloc[-1])
     ma60_val = _safe_float(ma_60.dropna().iloc[-1], default=latest_close) if not ma_60.dropna().empty else latest_close
 
-    # 1. Quality Z-score: ROE, Gross Margin, Operating Margin, FCF ratio, EPS stability
-    quality_components: List[float] = []
-    quality_notes: List[str] = []
+    # Historical 3-year metrics of target stock
+    hist_gm_vals: List[float] = [
+        (s.gross_profit / s.revenue) * 100.0
+        for s in all_stmts[-12:]
+        if s.revenue and s.revenue > 0 and s.gross_profit is not None
+    ]
+    hist_roe_vals: List[float] = []
+    for s in all_stmts[-12:]:
+        if s.net_income:
+            b = db.query(models.BalanceSheet).filter_by(stock_id=ticker, year=s.year, quarter=s.quarter).first()
+            if b and b.shareholders_equity and b.shareholders_equity > 0:
+                hist_roe_vals.append((s.net_income * 4.0 / b.shareholders_equity) * 100.0)
 
-    if latest_stmt and latest_stmt.revenue and latest_stmt.revenue > 0:
-        if latest_stmt.gross_profit is not None:
-            gm = latest_stmt.gross_profit / latest_stmt.revenue * 100.0
-            quality_components.append((gm - 28.0) / 15.0)
-            quality_notes.append(f"毛利率 {gm:.1f}%")
-        if latest_stmt.operating_income is not None:
-            om = latest_stmt.operating_income / latest_stmt.revenue * 100.0
-            quality_components.append((om - 15.0) / 12.0)
-        if latest_bal and latest_bal.shareholders_equity and latest_bal.shareholders_equity > 0 and latest_stmt.net_income:
-            roe = (latest_stmt.net_income * 4.0) / latest_bal.shareholders_equity * 100.0
-            quality_components.append((roe - 12.0) / 10.0)
-            quality_notes.append(f"年化ROE {roe:.1f}%")
+    # 1. Quality Z-score (vs Peer Cross-Sectional & 3Y History)
+    quality_components: List[float] = []
+    curr_gm = None
+    curr_roe = None
+
+    if latest_stmt and latest_stmt.revenue and latest_stmt.revenue > 0 and latest_stmt.gross_profit is not None:
+        curr_gm = (latest_stmt.gross_profit / latest_stmt.revenue) * 100.0
+        bench_gm = peer_gm_vals + hist_gm_vals
+        gm_med = float(np.median(bench_gm)) if bench_gm else 28.0
+        gm_std = float(np.std(bench_gm)) if len(bench_gm) > 1 else 10.0
+        z_gm = (curr_gm - gm_med) / max(gm_std, 3.0)
+        quality_components.append(_clip(z_gm, -3.0, 3.0))
+
+    if latest_bal and latest_bal.shareholders_equity and latest_bal.shareholders_equity > 0 and latest_stmt and latest_stmt.net_income:
+        curr_roe = (latest_stmt.net_income * 4.0 / latest_bal.shareholders_equity) * 100.0
+        bench_roe = peer_roe_vals + hist_roe_vals
+        roe_med = float(np.median(bench_roe)) if bench_roe else 12.0
+        roe_std = float(np.std(bench_roe)) if len(bench_roe) > 1 else 5.0
+        z_roe = (curr_roe - roe_med) / max(roe_std, 2.0)
+        quality_components.append(_clip(z_roe, -3.0, 3.0))
 
     if latest_cf and latest_cf.operating_cash_flow and latest_stmt and latest_stmt.net_income and latest_stmt.net_income > 0:
         cash_conv = latest_cf.operating_cash_flow / latest_stmt.net_income
-        quality_components.append((cash_conv - 0.9) / 0.5)
+        quality_components.append(_clip((cash_conv - 1.0) / 0.5, -2.5, 2.5))
 
     eps_vals = [float(s.eps) for s in all_stmts[-12:] if s.eps is not None]
     if len(eps_vals) >= 4:
         eps_mean = float(np.mean(eps_vals))
         eps_std = float(np.std(eps_vals))
         if eps_std > 1e-6:
-            stab = (eps_mean / eps_std) - 1.5
+            stab = (eps_mean / eps_std) - 1.2
             quality_components.append(_clip(stab * 0.5, -2.0, 2.0))
 
     quality_z = _clip(float(np.mean(quality_components)) if quality_components else 0.0, -3.0, 3.0)
 
-    # 2. Value Z-score: PE / PB / Dividend Yield / Mean Reversion vs 60D MA
+    q_notes = []
+    if curr_gm is not None:
+        q_notes.append(f"毛利率 {curr_gm:.1f}%")
+    if curr_roe is not None:
+        q_notes.append(f"年化ROE {curr_roe:.1f}%")
+    quality_notes_str = (
+        f"{'、'.join(q_notes)}（對比同產業同業中位數 / 近3年歷史區間）"
+        if q_notes
+        else "毛利率與年化ROE（對比同產業同業中位數 / 近3年歷史區間）"
+    )
+
+    # 2. Value Z-score (vs Peer Cross-Sectional & 3Y History)
     value_components: List[float] = []
-    value_notes: List[str] = []
+    curr_pe = None
+    curr_pb = None
+    curr_dy = None
 
     if mc_row and mc_row.market_cap and mc_row.market_cap > 0 and latest_stmt and latest_stmt.net_income and latest_stmt.net_income > 0:
         ann_ni_yi = (latest_stmt.net_income * 4.0) / 1e8
         if ann_ni_yi > 0:
-            pe = mc_row.market_cap / ann_ni_yi
-            value_components.append((20.0 - pe) / 10.0)
-            value_notes.append(f"預估本益比 {pe:.1f}x")
-    if mc_row and mc_row.market_cap and mc_row.market_cap > 0 and latest_bal and latest_bal.shareholders_equity and latest_bal.shareholders_equity > 0:
-        pb = (mc_row.market_cap * 1e8) / latest_bal.shareholders_equity
-        value_components.append((2.2 - pb) / 1.5)
-        value_notes.append(f"股價淨值比 {pb:.2f}x")
-    if annual_cash_div > 0 and latest_close > 0:
-        dy = (annual_cash_div / latest_close) * 100.0
-        value_components.append((dy - 3.0) / 2.0)
-        value_notes.append(f"現金殖利率 {dy:.2f}%")
+            curr_pe = mc_row.market_cap / ann_ni_yi
+            bench_pe = peer_pe_vals
+            pe_med = float(np.median(bench_pe)) if bench_pe else 20.0
+            pe_std = float(np.std(bench_pe)) if len(bench_pe) > 1 else 6.0
+            z_pe = (pe_med - curr_pe) / max(pe_std, 3.0)  # Lower PE = higher value score
+            value_components.append(_clip(z_pe, -3.0, 3.0))
 
-    # Price relative to 60-day moving average (mean reversion valuation component)
+    if mc_row and mc_row.market_cap and mc_row.market_cap > 0 and latest_bal and latest_bal.shareholders_equity and latest_bal.shareholders_equity > 0:
+        curr_pb = (mc_row.market_cap * 1e8) / latest_bal.shareholders_equity
+        bench_pb = peer_pb_vals
+        pb_med = float(np.median(bench_pb)) if bench_pb else 2.2
+        pb_std = float(np.std(bench_pb)) if len(bench_pb) > 1 else 0.8
+        z_pb = (pb_med - curr_pb) / max(pb_std, 0.4)  # Lower PB = higher value score
+        value_components.append(_clip(z_pb, -3.0, 3.0))
+
+    if annual_cash_div > 0 and latest_close > 0:
+        curr_dy = (annual_cash_div / latest_close) * 100.0
+        bench_dy = peer_dy_vals
+        dy_med = float(np.median(bench_dy)) if bench_dy else 3.5
+        dy_std = float(np.std(bench_dy)) if len(bench_dy) > 1 else 1.2
+        z_dy = (curr_dy - dy_med) / max(dy_std, 0.6)  # Higher DY = higher value score
+        value_components.append(_clip(z_dy, -3.0, 3.0))
+
     if ma60_val > 0:
         ma_discount = (ma60_val - latest_close) / ma60_val
-        value_components.append(_clip(ma_discount * 10.0, -2.0, 2.0))
+        value_components.append(_clip(ma_discount * 8.0, -2.0, 2.0))
 
     value_z = _clip(float(np.mean(value_components)) if value_components else 0.0, -3.0, 3.0)
 
+    v_notes = []
+    if curr_pe is not None:
+        v_notes.append(f"預估本益比 {curr_pe:.1f}x")
+    if curr_pb is not None:
+        v_notes.append(f"股價淨值比 {curr_pb:.2f}x")
+    if curr_dy is not None:
+        v_notes.append(f"現金殖利率 {curr_dy:.2f}%")
+    value_notes_str = (
+        f"{'、'.join(v_notes)}（對比同產業同業中位數 / 近3年歷史區間）"
+        if v_notes
+        else "估值指標（對比同產業同業中位數 / 近3年歷史區間）"
+    )
+
     return {
         "quality_z": round(quality_z, 3),
-        "quality_notes": "、".join(quality_notes) if quality_notes else "基於財報盈餘品質與現金流轉換指標",
+        "quality_notes": quality_notes_str,
         "value_z": round(value_z, 3),
-        "value_notes": "、".join(value_notes) if value_notes else "基於 PE/PB 估值折溢價與 60 日均線均值回歸",
+        "value_notes": value_notes_str,
     }
 
 
@@ -307,6 +425,51 @@ def _classify_quadrant(quality_z: float, momentum_z: float, value_z: float) -> s
     if quality_z < 0 and momentum_z < 0:
         return "體質趨弱・動能保守警戒"
     return "均衡配置・多空因子中性"
+
+
+def _generate_ai_diagnosis(
+    score: float,
+    momentum_z: float,
+    value_z: float,
+    quality_z: float,
+    low_vol_z: float,
+    beta: float,
+    smart_money_z: float,
+    rsi14: float,
+    z60: float,
+    ann_vol: float,
+) -> str:
+    """Generate concise, actionable, and human-friendly quantitative AI diagnosis according to GS-Quant specs."""
+    if z60 >= 2.0 and ann_vol >= 40.0:
+        return (
+            f"💡 量化白話文診斷：此標的近期具備極強的股價動能與{'法人買盤支撐' if smart_money_z > 0 else '市場話題買氣'}，"
+            f"但短期股價已嚴重偏離 60 日均線（達 +{z60:.2f}σ 超買區）且歷史波動極為劇烈（年化波動率 {ann_vol:.1f}%），"
+            f"切忌重倉追高，建議等待均值回歸拉回時再行分批佈局。"
+        )
+    if quality_z >= 0.4 and value_z >= 0.2:
+        return (
+            f"💡 量化白話文診斷：公司獲利體質與股東權益報酬率優於同業中位數（品質因子 +{quality_z:.2f}σ），"
+            f"目前本益比與淨值比估值相對合理且具安全邊際（價值因子 +{value_z:.2f}σ），基本面體質穩健，適合中長期價值型投資人逢低佈局。"
+        )
+    if momentum_z >= 0.4 and quality_z >= 0.2:
+        return (
+            f"💡 量化白話文診斷：此標的兼具基本面獲利體質（品質因子 +{quality_z:.2f}σ）與強勢主升段股價動能（動能因子 +{momentum_z:.2f}σ），"
+            f"多頭排列型態明確，但在接近波段壓力區時仍宜做好移動停利與資金部位控管。"
+        )
+    if rsi14 <= 35.0 and z60 <= -1.5:
+        return (
+            f"💡 量化白話文診斷：短線股價大幅修正並觸及超賣區（RSI={rsi14:.1f}，60日乖離達 {z60:.2f}σ），"
+            f"短線浮額清洗接近尾聲，技術面隨時可能出現均值回歸跌深反彈，適合採取逆勢小量分批佈局策略。"
+        )
+    if quality_z < -0.3 and momentum_z < -0.3:
+        return (
+            f"💡 量化白話文診斷：近期營運獲利體質走弱且技術線型落入空頭弱勢整理，法人籌碼亦偏向調節流出，"
+            f"整體量化評分偏低（{score:.0f}分），建議先以保守觀望、保留現金為主，待基本面出現落底反轉訊號後再行評估。"
+        )
+    return (
+        f"💡 量化白話文診斷：各量化因子表現相對均衡（綜合量化評分 {score:.0f} 分），"
+        f"目前股價處於區間震盪整理格局。建議投資人密切留意近期法人籌碼動向與關鍵均線支撐，順勢操作即可。"
+    )
 
 
 def get_factor_exposures(
@@ -505,6 +668,18 @@ def get_factor_exposures(
     )
     composite_score = _zscore_to_score(weighted_z)
     quant_quadrant = _classify_quadrant(quality_z, momentum_z, value_z)
+    ai_diagnosis = _generate_ai_diagnosis(
+        score=composite_score,
+        momentum_z=momentum_z,
+        value_z=value_z,
+        quality_z=quality_z,
+        low_vol_z=low_vol_z,
+        beta=beta_val,
+        smart_money_z=smart_money_z,
+        rsi14=rsi_14_val,
+        z60=z_60_val,
+        ann_vol=vol_60_val,
+    )
 
     # Rolling time series (last 60 trading days) for interactive UI chart
     rolling_dates = close_series.index[-60:]
@@ -570,5 +745,6 @@ def get_factor_exposures(
         },
         "composite_score": composite_score,
         "quant_quadrant": quant_quadrant,
+        "ai_diagnosis": ai_diagnosis,
         "rolling_series": rolling_series,
     }

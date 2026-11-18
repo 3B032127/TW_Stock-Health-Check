@@ -208,10 +208,30 @@ export enum ViewState {
   DATABASE_MANAGER = 'DATABASE_MANAGER'
 }
 
+export interface MarketDimensionStat {
+  label: string;
+  count: number;
+  target: number;
+  pct: number;
+  standard: string;
+}
+
 export interface DbSummary {
   fileSizeMb: number;
   totalStocks: number;
   totalRecords: number;
+  marketStats?: {
+    activeTwseTotal: number;
+    localActiveCount: number;
+    fullReadyCount: number;
+    fullReadyPct: number;
+    dimensions: {
+      financials?: MarketDimensionStat;
+      prices?: MarketDimensionStat;
+      chips?: MarketDimensionStat;
+      dividends?: MarketDimensionStat;
+    };
+  };
   tableCounts: {
     financials: number;
     prices: number;
@@ -352,6 +372,7 @@ export interface GSFactorData {
   risk_metrics: GSRiskMetrics;
   composite_score: number;
   quant_quadrant: string;
+  ai_diagnosis?: string;
   rolling_series: GSRollingPoint[];
 }
 
@@ -397,6 +418,14 @@ export interface GSBacktestStrategyInfo {
   description: string;
 }
 
+export interface GSCurrentStatus {
+  status: 'HOLD' | 'CASH';
+  weight: number;
+  badge_text: string;
+  entry_date: string | null;
+  entry_price: number | null;
+}
+
 export interface GSBacktestData {
   ticker: string;
   strategy: string;
@@ -409,6 +438,7 @@ export interface GSBacktestData {
   engine: string;
   gs_quant_version: string;
   metrics: GSBacktestMetrics;
+  current_status?: GSCurrentStatus;
   equity_curve: GSEquityPoint[];
   trade_log: GSTradeRecord[];
 }

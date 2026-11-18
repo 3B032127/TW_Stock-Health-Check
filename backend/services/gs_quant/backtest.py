@@ -230,11 +230,10 @@ def run_backtest(
     strat_nav.iloc[0] = initial_capital
     bench_nav.iloc[0] = initial_capital
 
-    # Running peak drawdown using gs_quant max_drawdown rolling window
+    # Running peak drawdown using rolling cumulative max strictly based on strategy NAV
     rolling_peak = strat_nav.cummax()
-    underwater_dd = (strat_nav / rolling_peak - 1.0) * 100.0
-    gs_mdd_series = max_drawdown(strat_nav, Window(len(strat_nav), 0))
-    max_dd_pct = _safe_float(gs_mdd_series.dropna().iloc[-1] * 100.0 if not gs_mdd_series.dropna().empty else underwater_dd.min(), 0.0, 2)
+    underwater_dd = (strat_nav - rolling_peak) / rolling_peak * 100.0
+    max_dd_pct = _safe_float(underwater_dd.min(), 0.0, 2)
 
     # Extract Trade Log on actual execution days (eval_pos changes)
     trade_log: List[Dict[str, Any]] = []
@@ -297,8 +296,9 @@ def run_backtest(
     trading_days = max(1, len(eval_dates) - 1)
     ann_ret_pct = ((1.0 + cum_ret_pct / 100.0) ** (252.0 / trading_days) - 1.0) * 100.0
 
-    strat_vol_series = volatility(strat_nav, Window(len(strat_nav), 0), annualization_factor=252).dropna()
-    ann_vol_pct = _safe_float(strat_vol_series.iloc[-1] if not strat_vol_series.empty else 0.0, 0.0, 2)
+    # Strategy realized annualized volatility strictly from strategy daily returns
+    strat_daily_vol = float(strat_daily_ret.std(ddof=1) * math.sqrt(252.0) * 100.0) if len(strat_daily_ret) > 1 else 0.0
+    ann_vol_pct = round(strat_daily_vol, 2)
 
     rf_pct = 1.5
     sharpe = ((ann_ret_pct - rf_pct) / ann_vol_pct) if ann_vol_pct > 1e-4 else 0.0
@@ -395,6 +395,35 @@ def run_backtest(
             db.rollback()
             print(f"Error persisting GSBacktestResult for {ticker}: {e}")
 
+    # Determine current practical holding status as of the latest trading day
+    latest_pos = float(eval_pos.iloc[-1])
+    last_trade = trade_log[-1] if trade_log else None
+    last_trade_date = last_trade["date"] if last_trade else eval_dates[-1].strftime("%Y-%m-%d")
+    last_trade_price = last_trade["price"] if last_trade else float(eval_close.iloc[-1])
+
+    if latest_pos > 0:
+        last_buy = next((t for t in reversed(trade_log) if t["action"] in ("BUY", "ADD")), None)
+        buy_date = last_buy["date"] if last_buy else last_trade_date
+        buy_price = last_buy["price"] if last_buy else last_trade_price
+        pct_label = "100% 滿倉" if latest_pos >= 0.99 else f"{int(round(latest_pos * 100))}% 持倉"
+        current_status_badge = f"📌 當前策略狀態：持有多單（{pct_label}｜於 {buy_date} @ {buy_price:.2f} 元觸發買進）"
+        current_status = {
+            "status": "HOLD",
+            "weight": round(latest_pos * 100, 0),
+            "badge_text": current_status_badge,
+            "entry_date": buy_date,
+            "entry_price": buy_price,
+        }
+    else:
+        current_status_badge = "📌 當前策略狀態：空手觀望中（0% 持股）"
+        current_status = {
+            "status": "CASH",
+            "weight": 0.0,
+            "badge_text": current_status_badge,
+            "entry_date": None,
+            "entry_price": None,
+        }
+
     return {
         "ticker": ticker,
         "strategy": strategy,
@@ -410,6 +439,7 @@ def run_backtest(
         "engine": "gs-quant",
         "gs_quant_version": getattr(gs_quant, "__version__", "2.2.5"),
         "metrics": metrics,
+        "current_status": current_status,
         "equity_curve": equity_curve,
         "trade_log": list(reversed(trade_log))[:50],  # Most recent 50 trades first
     }
