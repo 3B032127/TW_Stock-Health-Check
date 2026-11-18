@@ -25,10 +25,9 @@ export interface IndicatorDetail {
 }
 
 export const INDICATOR_CATEGORIES = {
-    TAIWAN: '台灣市場指標',
-    SEMICONDUCTOR: '半導體相關',
-    US_MARKET: '美國市場指標',
-    US_ECONOMIC: '美國經濟數據',
+    FX_JAPAN: '匯率與日本總經',
+    GLOBAL_RISK: '市場波動與利率',
+    US_ECONOMIC: '美國核心經濟數據',
 };
 
 export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
@@ -38,7 +37,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         nameEn: 'USD/TWD Exchange Rate',
         code: 'TWD=X',
         icon: 'currency_exchange',
-        category: INDICATOR_CATEGORIES.TAIWAN,
+        category: INDICATOR_CATEGORIES.FX_JAPAN,
         description: '美元兌新台幣匯率，反映台幣強弱與資金流向。影響出口競爭力與外資投資意願。',
         introduction: `美元兌新台幣匯率（USD/TWD）是衡量台幣相對美元強弱的重要指標。當匯率數值上升時，代表<span class="font-bold text-white">台幣貶值</span>，反之則代表台幣升值。
 
@@ -54,98 +53,64 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         unit: '',
     },
 
-    monitor_light: {
-        id: 'monitor_light',
-        name: '景氣對策信號',
-        nameEn: 'Economic Monitor Light',
-        code: 'NDC',
-        icon: 'traffic',
-        category: INDICATOR_CATEGORIES.TAIWAN,
-        description: '國發會發布的景氣綜合判斷指標，以燈號顏色反映經濟景氣狀況。',
-        introduction: `景氣對策信號由國家發展委員會每月發布，綜合9項經濟指標編製而成，以<span class="font-bold text-white">五種燈號</span>反映當前景氣狀況。
-
-<div class="my-4 space-y-2">
-  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(239, 68, 68, 0.1);">
-    <div class="w-4 h-4 rounded-full" style="background-color: #ef4444;"></div>
-    <span class="font-bold text-white">紅燈 (38-45分)</span>
-    <span class="text-textMuted">景氣過熱</span>
-  </div>
-  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(249, 115, 22, 0.1);">
-    <div class="w-4 h-4 rounded-full" style="background-color: #f97316;"></div>
-    <span class="font-bold text-white">黃紅燈 (32-37分)</span>
-    <span class="text-textMuted">景氣轉向熱絡</span>
-  </div>
-  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(16, 185, 129, 0.1);">
-    <div class="w-4 h-4 rounded-full" style="background-color: #10b981;"></div>
-    <span class="font-bold text-white">綠燈 (23-31分)</span>
-    <span class="text-textMuted">景氣穩定</span>
-  </div>
-  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(6, 182, 212, 0.1);">
-    <div class="w-4 h-4 rounded-full" style="background-color: #06b6d4;"></div>
-    <span class="font-bold text-white">黃藍燈 (17-22分)</span>
-    <span class="text-textMuted">景氣轉向低迷</span>
-  </div>
-  <div class="flex items-center gap-3 p-2 rounded" style="background-color: rgba(59, 130, 246, 0.1);">
-    <div class="w-4 h-4 rounded-full" style="background-color: #3b82f6;"></div>
-    <span class="font-bold text-white">藍燈 (9-16分)</span>
-    <span class="text-textMuted">景氣低迷</span>
-  </div>
-</div>
-
-綜合判斷分數由貨幣總計數M1B、股價指數、工業生產指數等9項指標加權計算而得，是觀察台灣總體經濟的重要先行指標。`,
+    usdjpy: {
+        id: 'usdjpy',
+        name: '日圓匯率 (USD/JPY)',
+        nameEn: 'USD/JPY Exchange Rate',
+        code: 'JPY=X',
+        icon: 'currency_yen',
+        category: INDICATOR_CATEGORIES.FX_JAPAN,
+        description: '美元兌日圓匯率，衡量日圓套利交易 (Carry Trade) 與亞洲避險資金動向。',
+        introduction: `美元兌日圓匯率（USD/JPY）反映日本與歐美之間的利差與避險資金流向。數值下跌代表<span class="font-bold text-white">日圓升值</span>，可能引發日圓套利交易平倉。`,
         analysis: {
-            title: '景氣燈號的投資意義',
-            content: '景氣對策信號是觀察台灣總體經濟的重要先行指標，對股市中長期走勢具有參考價值。',
-            positive: '綠燈或黃紅燈：經濟穩定成長或加溫，有利於股市表現，可積極布局。',
-            negative: '黃藍燈或藍燈：經濟降溫或衰退，股市可能面臨壓力，宜謹慎保守。',
+            title: '日圓與全球風險資產連動',
+            content: '日圓作為全球低利融資貨幣，其急升或急貶往往影響亞股與科技股資金部位。',
+            positive: '匯率溫和穩定：套利交易資金平穩，有利亞洲與科技股風險偏好。',
+            negative: '日圓急速升值：可能觸發套利平倉賣壓，造成跨市場波動放大。',
         },
-        chartColor: '#10b981',
-        chartGradient: 'colorMonitor',
-        unit: '分',
+        chartColor: '#06b6d4',
+        chartGradient: 'colorUsdJpy',
+        unit: '',
     },
 
-    sox: {
-        id: 'sox',
-        name: '費城半導體指數',
-        nameEn: 'Philadelphia Semiconductor Index',
-        code: '^SOX',
-        icon: 'memory',
-        category: INDICATOR_CATEGORIES.SEMICONDUCTOR,
-        description: '追蹤美國主要半導體公司的股價指數，為全球半導體產業景氣的領先指標。',
-        introduction: `費城半導體指數（SOX）由費城證券交易所編製，追蹤30家主要半導體設計、製造、設備與材料公司的股價表現，包括英特爾、輝達、台積電ADR等。
-
-由於台灣是全球半導體製造重鎮，<span class="font-bold text-white">SOX指數與台股高度連動</span>，特別是對台積電、聯發科等權值股影響顯著。該指數常被視為科技股與台股的領先指標。`,
+    jp_rate: {
+        id: 'jp_rate',
+        name: '日本央行利率 / 日債10Y',
+        nameEn: 'BOJ Policy Rate & JGB 10Y',
+        code: 'BOJ / JGB10Y',
+        icon: 'account_balance',
+        category: INDICATOR_CATEGORIES.FX_JAPAN,
+        description: '日本銀行基準利率與 10 年期日本公債殖利率，全球流動性與日圓強弱的核心錨點。',
+        introduction: `日本長期採取超寬鬆貨幣政策，日本央行升息與日債 10 年期殖利率攀升代表<span class="font-bold text-white">全球廉價日圓流動性收斂</span>。`,
         analysis: {
-            title: '半導體指數對台股的影響',
-            content: 'SOX指數反映全球半導體產業景氣，直接影響台灣半導體供應鏈的訂單與獲利預期。',
-            positive: 'SOX上漲：全球半導體需求強勁，有利台灣晶圓代工、IC設計、封測等產業鏈。',
-            negative: 'SOX下跌：產業進入庫存調整或需求放緩，台股科技類股可能面臨修正壓力。',
+            title: '日債殖利率與資金流向',
+            content: '當日本基準利率與日債殖利率上升，會縮小美日利差，帶動部分日本機構資金回流國內。',
+            positive: '利率變化符合市場預期：市場消化貨幣正常化步調，資金衝擊有限。',
+            negative: '央行鷹派超預期：日債殖利率急彈可能壓抑高估值風險資產。',
         },
-        chartColor: '#8b5cf6',
-        chartGradient: 'colorSox',
-        unit: '點',
+        chartColor: '#f59e0b',
+        chartGradient: 'colorJpRate',
+        unit: '%',
     },
 
-    tsmc_outlook: {
-        id: 'tsmc_outlook',
-        name: '台積電展望',
-        nameEn: 'TSMC Outlook',
-        code: 'TSMC',
-        icon: 'psychology',
-        category: INDICATOR_CATEGORIES.SEMICONDUCTOR,
-        description: 'AI分析台積電近期營運展望與市場情緒，作為台股科技類股的風向指標。',
-        introduction: `台積電（TSMC）作為全球最大晶圓代工廠，其營運展望對台股具有指標性意義。本指標透過<span class="font-bold text-white">AI分析</span>台積電法說會、營收數據、產能利用率等資訊，綜合評估市場情緒。
-
-台積電市值佔台股權重超過30%，其股價走勢往往主導大盤方向。此外，台積電的訂單能見度也反映全球科技產業的景氣狀況。`,
+    vix: {
+        id: 'vix',
+        name: 'VIX 恐慌指數',
+        nameEn: 'CBOE Volatility Index',
+        code: '^VIX',
+        icon: 'bolt',
+        category: INDICATOR_CATEGORIES.GLOBAL_RISK,
+        description: '衡量標普 500 指數選擇權未來 30 天的隱含波動率，反映全球市場風險偏好。',
+        introduction: `VIX 指數由芝加哥期權交易所 (CBOE) 編製，俗稱「恐慌指數」。低於 15 為<span class="font-bold text-white">低波動環境</span>，15-25 為正常區間，高於 25 代表避險情緒明顯升溫。`,
         analysis: {
-            title: '台積電展望的市場意義',
-            content: '台積電展望不僅影響個股，更是台股整體走勢與外資投資台灣的重要參考。',
-            positive: '展望樂觀：先進製程需求強勁，帶動台股科技類股與大盤上漲，外資加碼。',
-            negative: '展望保守：產業進入淡季或客戶砍單，可能拖累台股表現，資金轉向觀望。',
+            title: 'VIX 區間判讀',
+            content: 'VIX 通常與美股大盤呈負相關，常作為風險控管與市場情緒極值觀察指標。',
+            positive: 'VIX 回落至 15-20 以下：風險情緒穩定，資金願意承擔風險投資股市。',
+            negative: 'VIX 飆升突破 25：市場波動劇烈、避險買盤湧入，需控管部位槓桿。',
         },
-        chartColor: '#f97316',
-        chartGradient: 'colorTsmc',
-        unit: '/10',
+        chartColor: '#ef4444',
+        chartGradient: 'colorVix',
+        unit: '',
     },
 
     us_yield: {
@@ -154,7 +119,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         nameEn: 'US 10-Year Treasury Yield',
         code: '^TNX',
         icon: 'candlestick_chart',
-        category: INDICATOR_CATEGORIES.US_MARKET,
+        category: INDICATOR_CATEGORIES.GLOBAL_RISK,
         description: '全球資產定價之錨，反映市場對未來經濟與通膨的預期。聯準會貨幣政策的重要觀察指標。',
         introduction: `美國10年期公債殖利率（US 10-Year Treasury Yield）被廣泛視為全球金融市場的<span class="font-bold text-white">「無風險利率」(Risk-free Rate)</span>。它是投資者在評估其他資產（如股票、公司債、房地產）時的重要參考基準。
 
@@ -176,7 +141,7 @@ export const INDICATOR_DETAILS: Record<string, IndicatorDetail> = {
         nameEn: 'Federal Funds Rate',
         code: 'FEDFUNDS',
         icon: 'account_balance',
-        category: INDICATOR_CATEGORIES.US_MARKET,
+        category: INDICATOR_CATEGORIES.US_ECONOMIC,
         description: '聯邦基金利率目標區間，美國貨幣政策的核心工具，影響全球資金流向。',
         introduction: `聯邦基金利率（Federal Funds Rate）是美國聯準會（Fed）最重要的貨幣政策工具，透過調整銀行間隔夜拆款利率來影響整體經濟。
 
@@ -214,26 +179,24 @@ Fed設定的通膨目標為2%，當CPI持續高於此目標時，Fed可能採取
         unit: '%',
     },
 
-    us_ppi: {
-        id: 'us_ppi',
-        name: '美國PPI',
-        nameEn: 'US Producer Price Index',
-        code: 'PPI',
-        icon: 'factory',
+    us_nfp: {
+        id: 'us_nfp',
+        name: '美國非農就業 & 失業率',
+        nameEn: 'US Non-Farm Payrolls & Unemployment',
+        code: 'NFP',
+        icon: 'work',
         category: INDICATOR_CATEGORIES.US_ECONOMIC,
-        description: '生產者物價指數，反映上游成本壓力，領先CPI的通膨先行指標。',
-        introduction: `美國生產者物價指數（PPI）衡量生產者（製造商、批發商）出售商品的價格變化，反映<span class="font-bold text-white">上游成本壓力</span>。
-
-PPI通常領先CPI 1-2個月，因為生產者的成本上漲最終會轉嫁給消費者。因此，PPI是觀察未來通膨趨勢的重要先行指標，對預判Fed政策方向具有參考價值。`,
+        description: '美國非農業部門每月新增就業人口與失業率，聯準會評估勞動市場冷熱的關鍵指標。',
+        introduction: `美國非農就業報告每月第一個週五由勞工統計局發布，涵蓋新增就業人數與失業率。這是 <span class="font-bold text-white">Fed 利率決策與經濟軟/硬著陸</span> 最直接的風向球。`,
         analysis: {
-            title: 'PPI的領先意義',
-            content: 'PPI作為通膨的領先指標，其變化趨勢有助於提前判斷Fed政策轉向的可能性。',
-            positive: 'PPI回落：上游成本壓力緩解，未來CPI可能降溫，減輕Fed緊縮壓力。',
-            negative: 'PPI攀升：原物料與能源成本上漲，可能推升未來CPI，Fed政策趨緊。',
+            title: '非農與利率預期',
+            content: '市場會在「經濟韌性」與「聯準會降息空間」之間評估非農數據強弱。',
+            positive: '就業溫和成長且失業率穩定：經濟具韌性且不致阻礙降息步調。',
+            negative: '就業急凍或過熱超預期：前者引發衰退擔憂，後者延後降息預期。',
         },
-        chartColor: '#06b6d4',
-        chartGradient: 'colorPpi',
-        unit: '%',
+        chartColor: '#10b981',
+        chartGradient: 'colorNfp',
+        unit: '萬',
     },
 };
 

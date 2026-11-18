@@ -52,9 +52,8 @@ interface EconomicIndicatorsProps {
 const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicatorId, onNavigateHome }) => {
   // Helper to determine shortest valid period for an indicator
   const getShortestPeriod = (id: string) => {
-    if (id === 'monitor_light') return '1y';
-    if (['usdtwd', 'sox', 'us_yield'].includes(id)) return '1d';
-    return '1m';
+    if (['usdtwd', 'usdjpy', 'vix', 'us_yield'].includes(id)) return '1d';
+    return '1y';
   };
 
   const [selectedIndicator, setSelectedIndicator] = useState<string>(initialIndicatorId || 'usdtwd');
@@ -85,29 +84,7 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
         if (result.status === 'success' && result.data && result.data.indicators) {
           apiIndicators = result.data.indicators;
         }
-
-        // Load monitor light from CSV
-        const monitorData = await loadMonitorLightData();
-        setMonitorLightData(monitorData);
-        const latestMonitor = getLatestMonitorData(monitorData);
-
-        if (latestMonitor) {
-          const monitorIndicator: Indicator = {
-            id: 'monitor_light',
-            name: '景氣對策信號',
-            value: `${latestMonitor.score.toFixed(0)}分`,
-            change: `${latestMonitor.signal}燈`,
-            isUp: latestMonitor.score >= 23,
-            description: latestMonitor.score >= 32 ? '景氣轉熱' : latestMonitor.score >= 23 ? '景氣穩定' : '景氣轉冷',
-          };
-
-          // Merge monitor light with API indicators
-          // Filter out any existing monitor_light from API to avoid duplicates
-          const filteredApi = apiIndicators.filter(ind => ind.id !== 'monitor_light');
-          setIndicators([...filteredApi, monitorIndicator]);
-        } else {
-          setIndicators(apiIndicators);
-        }
+        setIndicators(apiIndicators);
       } catch (error) {
         console.error('Error fetching indicators:', error);
       } finally {
@@ -154,7 +131,7 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
     // Only if history is empty and not loading, ensuring we don't show empty chart while loading
     // But if backend returns empty, we might want to show empty or placeholder.
     // Let's keep existing mock logic ONLY if we expect no backend data for this ID
-    const marketIndicators = ['usdtwd', 'sox', 'us_yield'];
+    const marketIndicators = ['usdtwd', 'usdjpy', 'vix', 'us_yield'];
     if (!marketIndicators.includes(selectedIndicator)) {
       // Parse current value (remove non-numeric characters)
       const numericValue = parseFloat(currentIndicatorData.value.replace(/[^0-9.-]/g, ''));
@@ -177,7 +154,7 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
   }
 
   // Check if current indicator supports 1D/Intraday
-  const supportsIntraday = ['usdtwd', 'sox', 'us_yield'].includes(selectedIndicator);
+  const supportsIntraday = ['usdtwd', 'usdjpy', 'vix', 'us_yield'].includes(selectedIndicator);
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 animate-fade-in">

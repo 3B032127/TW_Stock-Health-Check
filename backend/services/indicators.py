@@ -16,6 +16,7 @@ import google.generativeai as genai
 import httpx
 from bs4 import BeautifulSoup
 import re
+from .global_indices import _yf_lock
 
 
 class MarketIndicatorsService:
@@ -25,96 +26,89 @@ class MarketIndicatorsService:
         self.gemini_api_key = gemini_api_key
         if gemini_api_key:
             genai.configure(api_key=gemini_api_key)
-    
+
+    def _fetch_yf_series(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Thread-safe 30-day daily fetch for real indicator values & sparkline."""
+        try:
+            with _yf_lock:
+                hist = yf.Ticker(ticker).history(period="1mo", interval="1d")
+                if hist is not None and not hist.empty:
+                    hist = hist.dropna(subset=["Close"]).copy()
+                else:
+                    hist = None
+            if hist is None or len(hist) < 2:
+                return None
+            closes = [round(float(v), 4) for v in hist["Close"].tolist()]
+            current_price = float(closes[-1])
+            prev_close = float(closes[-2])
+            change = current_price - prev_close
+            percent = (change / prev_close) * 100 if prev_close != 0 else 0.0
+            last_date = hist.index[-1].strftime("%Y-%m-%d")
+            return {
+                "current": current_price,
+                "prev": prev_close,
+                "change": change,
+                "percent": percent,
+                "high": max(closes),
+                "low": min(closes),
+                "date": last_date,
+                "sparkline": closes,
+            }
+        except Exception as e:
+            print(f"Error fetching {ticker}: {e}")
+            return None
+
     def fetch_yfinance_indicator(
         self, 
         ticker: str, 
         name: str,
         special_handling: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Fetch indicator data from Yahoo Finance
-        
-        Args:
-            ticker: Yahoo Finance ticker symbol
-            name: Display name for the indicator
-            special_handling: Special processing rules (e.g., 'tnx_divide_10')
-        
-        Returns:
-            Dictionary with indicator data
-        """
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d")
-            
-            if hist.empty or len(hist) < 2:
-                return self._create_error_indicator(name, "數據不足")
-            
-            current_price = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2]
-            
-            # Convert to Python native types
-            current_price = float(current_price)
-            prev_close = float(prev_close)
-            
-            change = current_price - prev_close
-            percent = (change / prev_close) * 100 if prev_close != 0 else 0
-            
-            return {
-                "name": name,
-                "value": f"{current_price:.2f}",
-                "change": f"{change:+.2f}",
-                "changePercent": f"{percent:+.2f}%",
-                "isUp": bool(change >= 0)
-            }
-            
-        except Exception as e:
-            print(f"Error fetching {ticker}: {e}")
-            return self._create_error_indicator(name, "無法取得數據")
-    
+        """Fetch indicator data and 30d sparkline from Yahoo Finance."""
+        series = self._fetch_yf_series(ticker)
+        if not series:
+            return self._create_error_indicator(name, "數據不足")
+
+        current_price = series["current"]
+        prev_close = series["prev"]
+        change = series["change"]
+        percent = series["percent"]
+
+        return {
+            "name": name,
+            "value": f"{current_price:.2f}",
+            "change": f"{change:+.2f}",
+            "changePercent": f"{percent:+.2f}%",
+            "isUp": bool(change >= 0),
+            "prev": f"{prev_close:.2f}",
+            "date": series["date"],
+            "sparkline": series["sparkline"],
+        }
+
     def fetch_usdtwd_indicator(self) -> Dict[str, Any]:
-        """
-        Fetch USD/TWD exchange rate with special interpretation
-        
-        When value goes up = TWD depreciates (台幣貶值) = negative for market
-        When value goes down = TWD appreciates (台幣升值) = positive for market
-        """
-        try:
-            stock = yf.Ticker("TWD=X")
-            hist = stock.history(period="5d")
-            
-            if hist.empty or len(hist) < 2:
-                return self._create_error_indicator("台幣匯率", "數據不足")
-            
-            current_price = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2]
-            
-            # Convert to Python native types
-            current_price = float(current_price)
-            prev_close = float(prev_close)
-            
-            change = current_price - prev_close
-            percent = (change / prev_close) * 100 if prev_close != 0 else 0
-            
-            # Interpretation logic
-            is_up = bool(change >= 0)
-            is_positive_for_market = not is_up  # Inverse relationship
-            
-            note = "數值跌代表台幣升值(資金流入)" if not is_up else "數值漲代表台幣貶值(資金流出)"
-            
-            return {
-                "name": "台幣匯率",
-                "value": f"{current_price:.2f}",
-                "change": f"{change:+.2f}",
-                "changePercent": f"{percent:+.2f}%",
-                "isUp": is_up,
-                "note": note,
-                "isPositiveForMarket": is_positive_for_market
-            }
-            
-        except Exception as e:
-            print(f"Error fetching USD/TWD: {e}")
-            return self._create_error_indicator("台幣匯率", "無法取得數據")
+        """Fetch USD/TWD exchange rate with 30d real history."""
+        series = self._fetch_yf_series("TWD=X")
+        if not series:
+            return self._create_error_indicator("台幣匯率 (USD/TWD)", "數據不足")
+
+        current_price = series["current"]
+        prev_close = series["prev"]
+        change = series["change"]
+        percent = series["percent"]
+        is_up = bool(change >= 0)
+
+        return {
+            "id": "usdtwd",
+            "name": "台幣匯率 (USD/TWD)",
+            "value": f"{current_price:.2f}",
+            "change": f"{change:+.2f}",
+            "changePercent": f"{percent:+.2f}%",
+            "isUp": is_up,
+            "description": f"前值: {prev_close:.2f} | 30日區間: {series['low']:.2f}-{series['high']:.2f}",
+            "note": "數值跌代表台幣升值(資金流入)，漲代表貶值" if not is_up else "數值漲代表台幣貶值(外資資金偏保守)",
+            "isPositiveForMarket": not is_up,
+            "sparkline": series["sparkline"],
+        }
     
     def fetch_economic_monitor_light(self) -> Dict[str, Any]:
         """
@@ -255,91 +249,94 @@ class MarketIndicatorsService:
             "isUp": False
         }
     
-    def fetch_us_economic_indicators(self) -> List[Dict[str, Any]]:
-        """
-        Fetch US CPI, PPI, and Fed Rate with AI trend analysis
-        Uses JSON file for data + Gemini AI for analysis
-        """
-        # Read data from JSON file
+    def _load_macro_json(self) -> Dict[str, Any]:
         json_path = Path(__file__).parent.parent / "us_economic_data.json"
-        
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+                return json.load(f)
         except Exception as e:
             print(f"Error reading us_economic_data.json: {e}")
-            # Return default data if file not found
-            data = {
-                "cpi": {"value": 3.4, "date": "2026-01", "yoy_change": 3.4},
-                "ppi": {"value": 3.0, "date": "2026-01", "yoy_change": 3.0},
-                "fed_rate": {"value": 4.50, "date": "2026-01", "range": "4.25-4.50"}
-            }
-        
-        # Use Gemini AI to analyze rate trend if API key available
-        rate_analysis = self._analyze_fed_rate_trend(data) if self.gemini_api_key else None
-        
-        indicators = []
-        
-        # 1. CPI (Consumer Price Index)
-        cpi_data = data.get("cpi", {})
-        indicators.append({
-            "name": "美國CPI",
-            "value": f"{cpi_data.get('value', 0):.1f}%",
-            "change": f"{cpi_data.get('date', 'N/A')}",
-            "changePercent": f"年增 {cpi_data.get('yoy_change', 0):.1f}%",
-            "isUp": cpi_data.get('yoy_change', 0) > 2.0,  # Fed target is 2%
-            "description": "消費者物價指數",
-            "note": "Fed 目標為 2%，高於目標表示通膨壓力",
-            "id": "us_cpi"
-        })
-        
-        # 2. PPI (Producer Price Index)
-        ppi_data = data.get("ppi", {})
-        indicators.append({
-            "name": "美國PPI",
-            "value": f"{ppi_data.get('value', 0):.1f}%",
-            "change": f"{ppi_data.get('date', 'N/A')}",
-            "changePercent": f"年增 {ppi_data.get('yoy_change', 0):.1f}%",
-            "isUp": ppi_data.get('yoy_change', 0) > 2.0,
-            "description": "生產者物價指數",
-            "note": "領先CPI，反映上游成本壓力",
-            "id": "us_ppi"
-        })
-        
+            return {}
+
+    def fetch_us_economic_indicators(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Build objective macro indicators (jp_rate, us_nfp, fed_rate, us_cpi)
+        with previous/forecast comparison and real 12-period historical trends.
+        """
+        data = self._load_macro_json()
+        result: Dict[str, Dict[str, Any]] = {}
+
+        # 1. Japan Policy Rate & JGB 10Y
+        jp = data.get("jp_rate", {})
+        jp_rate_val = float(jp.get("value", 0.50))
+        jgb_10y = float(jp.get("jgb_10y", 1.09))
+        jp_hist = [float(p["value"]) for p in jp.get("history", [])]
+        result["jp_rate"] = {
+            "id": "jp_rate",
+            "name": "日本央行利率 / 日債10Y",
+            "value": f"{jp_rate_val:.2f}%",
+            "change": f"日債10Y {jgb_10y:.2f}%",
+            "changePercent": "",
+            "isUp": jp_rate_val >= 0.25,
+            "description": f"前值: {jp.get('prev', '0.25%')} | 市場預期: {jp.get('forecast', '0.50%')} | 月份: {jp.get('date', '2026-10')}",
+            "note": jp.get("note", "日債10Y影響日圓套利資金與全球流動性"),
+            "sparkline": jp_hist,
+        }
+
+        # 2. US Non-Farm Payrolls & Unemployment
+        nfp = data.get("us_nfp", {})
+        nfp_val = float(nfp.get("value", 18.5))
+        unemp = float(nfp.get("unemployment", 4.1))
+        nfp_hist = [float(p["value"]) for p in nfp.get("history", [])]
+        result["us_nfp"] = {
+            "id": "us_nfp",
+            "name": "美國非農就業 & 失業率",
+            "value": f"+{nfp_val:.1f}萬",
+            "change": f"失業率 {unemp:.1f}%",
+            "changePercent": "",
+            "isUp": nfp_val >= 15.0,
+            "description": f"前值: {nfp.get('prev', '+22.3萬')} | 預期: {nfp.get('forecast', '+18.0萬')} | {nfp.get('date', '2026-10')}",
+            "note": nfp.get("note", "非農就業與失業率為 Fed 利率決策核心依據"),
+            "sparkline": nfp_hist,
+        }
+
         # 3. Federal Funds Rate
-        fed_data = data.get("fed_rate", {})
-        fed_value = fed_data.get('value', 0)
-        fed_range = fed_data.get('range', f"{fed_value:.2f}")
-        
-        # Determine if in rate hike or cut cycle
-        if rate_analysis:
-            cycle_text = rate_analysis.get('cycle', '維持利率')
-            trend_text = rate_analysis.get('analysis', '')
-        else:
-            # Simple heuristic based on rate level
-            if fed_value >= 4.5:
-                cycle_text = "高利率環境"
-                trend_text = "利率處於高位，可能進入降息循環"
-            elif fed_value <= 2.0:
-                cycle_text = "低利率環境"
-                trend_text = "利率處於低位，可能進入升息循環"
-            else:
-                cycle_text = "中性利率"
-                trend_text = "利率處於中性水平"
-        
-        indicators.append({
-            "name": "Fed 利率",
+        fed = data.get("fed_rate", {})
+        fed_value = float(fed.get("value", 4.375))
+        fed_range = fed.get("range", f"{fed_value:.2f}")
+        fed_hist = [float(p["value"]) for p in fed.get("history", [])]
+        cut_bps = fed.get("expected_cut_bps", 25)
+        result["fed_rate"] = {
+            "id": "fed_rate",
+            "name": "FED 基準利率",
             "value": f"{fed_range}%",
-            "change": cycle_text,
-            "changePercent": f"{fed_data.get('date', 'N/A')}",
+            "change": f"預期降息 {cut_bps}bps" if cut_bps else "維持基準利率",
+            "changePercent": f"{fed.get('date', 'N/A')}",
             "isUp": fed_value > 3.0,
-            "description": "聯邦基金利率目標區間",
-            "text": trend_text,
-            "note": f"當前處於{cycle_text}",
-            "id": "fed_rate"
-        })
-        
-        return indicators
+            "description": f"前值: {fed.get('prev_range', '4.50-4.75%')} | 下次FOMC: {fed.get('next_fomc', '12/18')}",
+            "note": fed.get("note", "基準利率影響全球無風險利率與外資成本"),
+            "sparkline": fed_hist,
+        }
+
+        # 4. US Inflation (CPI / Core PCE / PPI)
+        cpi = data.get("cpi", {})
+        cpi_val = float(cpi.get("value", 2.6))
+        core_pce = float(cpi.get("core_pce", 2.8))
+        ppi_val = float(cpi.get("ppi", data.get("ppi", {}).get("value", 2.4)))
+        cpi_hist = [float(p["value"]) for p in cpi.get("history", [])]
+        result["us_cpi"] = {
+            "id": "us_cpi",
+            "name": "美國通膨指標 (CPI / PCE)",
+            "value": f"{cpi_val:.1f}%",
+            "change": f"核心PCE {core_pce:.1f}%",
+            "changePercent": f"年增 {cpi_val:.1f}%",
+            "isUp": cpi_val > 2.0,
+            "description": f"前值: {cpi.get('prev', '2.4%')} | 預期: {cpi.get('forecast', '2.6%')} | PPI: {ppi_val:.1f}%",
+            "note": cpi.get("note", "高於 Fed 2% 通膨目標，牽動降息節奏"),
+            "sparkline": cpi_hist,
+        }
+
+        return result
     
     def _analyze_fed_rate_trend(self, data: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """
@@ -657,14 +654,28 @@ class MarketIndicatorsService:
         ticker_map = {
             "usdtwd": "TWD=X",
             "sox": "^SOX",
+            "usdjpy": "JPY=X",
+            "vix": "^VIX",
             "us_yield": "^TNX",
             "taiex": "^TWII"
         }
+
+        macro_key_map = {
+            "jp_rate": "jp_rate",
+            "us_nfp": "us_nfp",
+            "fed_rate": "fed_rate",
+            "us_cpi": "cpi",
+        }
+        if indicator_id in macro_key_map:
+            macro = self._load_macro_json().get(macro_key_map[indicator_id], {})
+            return {
+                "indicator_id": indicator_id,
+                "period": period,
+                "history": macro.get("history", [])
+            }
         
         # Handle non-market indicators or those without yahoo tickers
         if indicator_id not in ticker_map:
-            # For these, we might return empty history or implement specific logic later
-            # For now, return empty to stop random generation on frontend
             return {
                 "indicator_id": indicator_id,
                 "period": period,
@@ -674,17 +685,15 @@ class MarketIndicatorsService:
         ticker_symbol = ticker_map[indicator_id]
         
         try:
-            ticker = yf.Ticker(ticker_symbol)
-            
             # Determine interval based on period
             interval = "1d"
             scrape_period = period
             
             if period == "1d":
-                interval = "5m" # 5-minute data for 1 day
+                interval = "5m"
             elif period == "1w":
                 interval = "30m"
-                scrape_period = "5d" # yfinance uses 5d for 1 week
+                scrape_period = "5d"
             elif period == "1m":
                 interval = "1d"
                 scrape_period = "1mo"
@@ -692,15 +701,20 @@ class MarketIndicatorsService:
                 interval = "1d"
                 scrape_period = "6mo"
             elif period == "1y":
-                interval = "1d" # Daily for 1 year
+                interval = "1d"
                 scrape_period = "1y"
             elif period == "5y":
-                interval = "1wk" # Weekly for 5 years to reduce data size
+                interval = "1wk"
                 scrape_period = "5y"
                 
-            hist = ticker.history(period=scrape_period, interval=interval)
+            with _yf_lock:
+                hist = yf.Ticker(ticker_symbol).history(period=scrape_period, interval=interval)
+                if hist is not None and not hist.empty:
+                    hist = hist.dropna(subset=["Close"]).copy()
+                else:
+                    hist = None
             
-            if hist.empty:
+            if hist is None or hist.empty:
                 return {
                     "indicator_id": indicator_id,
                     "period": period,
@@ -711,17 +725,12 @@ class MarketIndicatorsService:
             
             # Process dataframe
             for idx, row in hist.iterrows():
-                # Format date based on interval
                 if period in ["1d", "1w"]:
                     date_str = idx.strftime("%Y-%m-%d %H:%M")
                 else:
                     date_str = idx.strftime("%Y-%m-%d")
                     
                 val = float(row['Close'])
-                
-                # Special handling for USD/TWD (inverse logic for color, but value is same)
-                # Special handling for US Yield (divide by 10 not needed for ^TNX usually, it returns percentage directly e.g. 4.5)
-                
                 history_data.append({
                     "date": date_str,
                     "value": val
@@ -745,60 +754,100 @@ class MarketIndicatorsService:
     
     def get_all_indicators(self) -> Dict[str, Any]:
         """
-        Fetch all 6 market indicators
-        
-        Returns:
-            Dictionary with updated_at timestamp and list of indicators
+        Fetch the 8 objective macroeconomic & market risk indicators (2x4 grid)
+        plus taiex health anchor.
         """
-        indicators = []
-        
-        # 1. TAIEX (Taiwan Weighted Index)
-        taiex = self.fetch_yfinance_indicator(
-            "^TWII", 
-            "加權指數"
-        )
+        indicators: List[Dict[str, Any]] = []
+
+        # Internal TAIEX health check anchor (filtered out on Dashboard)
+        taiex = self.fetch_yfinance_indicator("^TWII", "加權指數")
         taiex["id"] = "taiex"
         taiex["description"] = "台股整體表現"
         indicators.append(taiex)
-        
-        # 2. USD/TWD Exchange Rate
+
+        # Row 1: FX, Volatility & BOJ
+        # 1. USD/TWD
         usdtwd = self.fetch_usdtwd_indicator()
-        usdtwd["id"] = "usdtwd"
         indicators.append(usdtwd)
-        
-        # 3. Philadelphia Semiconductor Index
-        sox = self.fetch_yfinance_indicator(
-            "^SOX",
-            "費城半導體"
-        )
-        sox["id"] = "sox"
-        sox["description"] = "連動台股半導體"
-        indicators.append(sox)
-        
-        # 4. US 10-Year Treasury Yield
-        us_yield = self.fetch_yfinance_indicator(
-            "^TNX",
-            "美債殖利率(10年)"
-        )
-        us_yield["id"] = "us_yield"
-        us_yield["value"] = us_yield["value"] + "%"  # Add % symbol
-        us_yield["description"] = "外資資金成本"
+
+        # 2. USD/JPY
+        usdjpy_s = self._fetch_yf_series("JPY=X")
+        if usdjpy_s:
+            usdjpy = {
+                "id": "usdjpy",
+                "name": "日圓匯率 (USD/JPY)",
+                "value": f"{usdjpy_s['current']:.2f}",
+                "change": f"{usdjpy_s['change']:+.2f}",
+                "changePercent": f"{usdjpy_s['percent']:+.2f}%",
+                "isUp": bool(usdjpy_s["change"] >= 0),
+                "description": f"前值: {usdjpy_s['prev']:.2f} | 30日區間: {usdjpy_s['low']:.2f}-{usdjpy_s['high']:.2f}",
+                "note": "數值跌代表日圓升值，漲代表日圓貶值與資金外流",
+                "sparkline": usdjpy_s["sparkline"],
+            }
+        else:
+            usdjpy = self._create_error_indicator("日圓匯率 (USD/JPY)", "數據不足")
+            usdjpy["id"] = "usdjpy"
+            usdjpy["sparkline"] = []
+        indicators.append(usdjpy)
+
+        # Macro JSON bundle (jp_rate, us_nfp, fed_rate, us_cpi)
+        macro_map = self.fetch_us_economic_indicators()
+
+        # 3. BOJ Policy Rate & JGB 10Y
+        indicators.append(macro_map["jp_rate"])
+
+        # 4. VIX Fear Index (^VIX)
+        vix_s = self._fetch_yf_series("^VIX")
+        if vix_s:
+            vix_val = vix_s["current"]
+            regime = "低波動環境 (<15)" if vix_val < 15 else "正常波動 (15-25)" if vix_val <= 25 else "避險升溫 (>25)"
+            vix = {
+                "id": "vix",
+                "name": "VIX 恐慌指數 (^VIX)",
+                "value": f"{vix_val:.2f}",
+                "change": f"{vix_s['change']:+.2f}",
+                "changePercent": f"{vix_s['percent']:+.2f}%",
+                "isUp": bool(vix_s["change"] >= 0),
+                "description": f"區間: {regime} | 前值: {vix_s['prev']:.2f}",
+                "note": "衡量美股標普 500 隱含波動與全球市場風險情緒",
+                "sparkline": vix_s["sparkline"],
+            }
+        else:
+            vix = self._create_error_indicator("VIX 恐慌指數 (^VIX)", "數據不足")
+            vix["id"] = "vix"
+            vix["sparkline"] = []
+        indicators.append(vix)
+
+        # Row 2: US Employment, Yields, Fed Rate & Inflation
+        # 5. US NFP & Unemployment
+        indicators.append(macro_map["us_nfp"])
+
+        # 6. US 10-Year Treasury Yield
+        yield_s = self._fetch_yf_series("^TNX")
+        if yield_s:
+            us_yield = {
+                "id": "us_yield",
+                "name": "美債殖利率 (10年)",
+                "value": f"{yield_s['current']:.2f}%",
+                "change": f"{yield_s['change']:+.2f}",
+                "changePercent": f"{yield_s['percent']:+.2f}%",
+                "isUp": bool(yield_s["change"] >= 0),
+                "description": f"前值: {yield_s['prev']:.2f}% | 30日區間: {yield_s['low']:.2f}-{yield_s['high']:.2f}%",
+                "note": "全球無風險利率基準，直接影響科技股估值折現率",
+                "sparkline": yield_s["sparkline"],
+            }
+        else:
+            us_yield = self._create_error_indicator("美債殖利率 (10年)", "數據不足")
+            us_yield["id"] = "us_yield"
+            us_yield["sparkline"] = []
         indicators.append(us_yield)
-        
-        # 5. Economic Monitor Light
-        monitor = self.fetch_economic_monitor_light()
-        monitor["id"] = "monitor_light"
-        indicators.append(monitor)
-        
-        # 6. TSMC Outlook
-        tsmc = self.fetch_tsmc_outlook()
-        tsmc["id"] = "tsmc_outlook"
-        indicators.append(tsmc)
-        
-        # 7-9. US Economic Indicators (CPI, PPI, Fed Rate)
-        us_indicators = self.fetch_us_economic_indicators()
-        indicators.extend(us_indicators)
-        
+
+        # 7. FED Funds Rate
+        indicators.append(macro_map["fed_rate"])
+
+        # 8. US CPI / Core PCE
+        indicators.append(macro_map["us_cpi"])
+
         return {
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "indicators": indicators

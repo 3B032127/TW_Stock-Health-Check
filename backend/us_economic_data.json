@@ -1,21 +1,103 @@
 {
+    "jp_rate": {
+        "value": 0.50,
+        "jgb_10y": 1.09,
+        "prev": "0.25%",
+        "forecast": "0.50%",
+        "date": "2026-10",
+        "note": "日債10Y影響日圓套利資金與全球流動性",
+        "description": "日本央行基準利率與 10 年期公債殖利率",
+        "history": [
+            {"date": "2025-12", "value": 0.89},
+            {"date": "2026-01", "value": 0.92},
+            {"date": "2026-02", "value": 0.95},
+            {"date": "2026-03", "value": 0.91},
+            {"date": "2026-04", "value": 0.98},
+            {"date": "2026-05", "value": 1.02},
+            {"date": "2026-06", "value": 1.05},
+            {"date": "2026-07", "value": 1.01},
+            {"date": "2026-08", "value": 1.04},
+            {"date": "2026-09", "value": 1.07},
+            {"date": "2026-10", "value": 1.06},
+            {"date": "2026-11", "value": 1.09}
+        ]
+    },
+    "us_nfp": {
+        "value": 18.5,
+        "unemployment": 4.1,
+        "prev": "+22.3萬",
+        "forecast": "+18.0萬",
+        "date": "2026-10",
+        "note": "非農就業與失業率為 Fed 利率決策核心依據",
+        "description": "美國非農就業新增人數（萬人）與失業率",
+        "history": [
+            {"date": "2025-12", "value": 21.2},
+            {"date": "2026-01", "value": 17.5},
+            {"date": "2026-02", "value": 19.8},
+            {"date": "2026-03", "value": 22.8},
+            {"date": "2026-04", "value": 16.5},
+            {"date": "2026-05", "value": 21.6},
+            {"date": "2026-06", "value": 17.9},
+            {"date": "2026-07", "value": 14.4},
+            {"date": "2026-08", "value": 15.9},
+            {"date": "2026-09", "value": 22.3},
+            {"date": "2026-10", "value": 18.5}
+        ]
+    },
     "cpi": {
-        "value": 3.4,
-        "date": "2026-01",
-        "yoy_change": 3.4,
-        "description": "消費者物價指數年增率"
+        "value": 2.6,
+        "core_pce": 2.8,
+        "ppi": 2.4,
+        "prev": "2.4%",
+        "forecast": "2.6%",
+        "date": "2026-10",
+        "yoy_change": 2.6,
+        "note": "高於 Fed 2% 通膨目標，牽動降息節奏",
+        "description": "美國消費者物價指數 (CPI) 與核心 PCE 年增率",
+        "history": [
+            {"date": "2025-12", "value": 3.1},
+            {"date": "2026-01", "value": 3.1},
+            {"date": "2026-02", "value": 3.2},
+            {"date": "2026-03", "value": 3.5},
+            {"date": "2026-04", "value": 3.4},
+            {"date": "2026-05", "value": 3.3},
+            {"date": "2026-06", "value": 3.0},
+            {"date": "2026-07", "value": 2.9},
+            {"date": "2026-08", "value": 2.5},
+            {"date": "2026-09", "value": 2.4},
+            {"date": "2026-10", "value": 2.6}
+        ]
     },
     "ppi": {
-        "value": 3.0,
-        "date": "2026-01",
-        "yoy_change": 3.0,
+        "value": 2.4,
+        "date": "2026-10",
+        "yoy_change": 2.4,
         "description": "生產者物價指數年增率"
     },
     "fed_rate": {
-        "value": 4.50,
-        "date": "2026-01",
+        "value": 4.375,
+        "date": "2026-11",
         "range": "4.25-4.50",
-        "description": "聯邦基金利率目標區間"
+        "prev_range": "4.50-4.75%",
+        "forecast_range": "4.25-4.50%",
+        "next_fomc": "12/18",
+        "expected_cut_bps": 25,
+        "note": "基準利率影響全球無風險利率與外資成本",
+        "description": "聯邦基金利率目標區間",
+        "history": [
+            {"date": "2025-12", "value": 5.38},
+            {"date": "2026-01", "value": 5.38},
+            {"date": "2026-02", "value": 5.38},
+            {"date": "2026-03", "value": 5.38},
+            {"date": "2026-04", "value": 5.38},
+            {"date": "2026-05", "value": 5.38},
+            {"date": "2026-06", "value": 5.13},
+            {"date": "2026-07", "value": 5.13},
+            {"date": "2026-08", "value": 4.88},
+            {"date": "2026-09", "value": 4.63},
+            {"date": "2026-10", "value": 4.63},
+            {"date": "2026-11", "value": 4.38}
+        ]
     },
-    "last_updated": "2026-02-06"
+    "last_updated": "2026-11-18"
 }
