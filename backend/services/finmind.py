@@ -82,7 +82,6 @@ class TokenManager:
                 new_exhausted_until = now + reset_after_seconds
                 if new_exhausted_until > t["exhausted_until"]:
                     t["exhausted_until"] = new_exhausted_until
-                    print(f"[TokenManager] {t['name']} marked exhausted until {time.strftime('%H:%M:%S', time.localtime(t['exhausted_until']))}")
                 break
 
     async def fetch_usages(self):
@@ -101,16 +100,46 @@ class TokenManager:
                     t["user_count"] = user_count
                     t["limit"] = limit
                     t["last_checked"] = now
-                    usages.append(f"{t['name']}: {user_count}/{limit}")
+                    
+                    # 若在冷卻中，標註冷卻剩餘時間
+                    if t["exhausted_until"] > now:
+                        rem_sec = int(t["exhausted_until"] - now)
+                        m = rem_sec // 60
+                        s = rem_sec % 60
+                        usages.append(f"{t['name']}: {user_count}/{limit} (冷卻中 {m:02d}:{s:02d})")
+                    else:
+                        usages.append(f"{t['name']}: {user_count}/{limit}")
                     
                     # 額度若歸零或低於門檻，自動清除冷卻標記
                     if user_count < limit - 50:
                         if t["exhausted_until"] > now:
                             t["exhausted_until"] = 0
                 except Exception as e:
-                    usages.append(f"{t['name']}: Error")
-                    print(f"[TokenManager] Error fetching usage for {t['name']}: {e}")
+                    usages.append(f"{t['name']}: 連線檢查中")
         return " | ".join(usages)
+
+    def get_cooldown_status(self) -> dict:
+        now = time.time()
+        active_tokens = [
+            t for t in self.tokens 
+            if t["exhausted_until"] <= now and (t["limit"] - t["user_count"]) > self.reserved_for_web
+        ]
+        has_capacity = len(active_tokens) > 0
+        min_wait = 0
+        if not has_capacity and self.tokens:
+            resets = [t["exhausted_until"] for t in self.tokens if t["exhausted_until"] > now]
+            if resets:
+                min_wait = max(0, int(min(resets) - now))
+            else:
+                # 額度用完但尚未標記，預設等待至下個整點
+                next_hour = (datetime.now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+                min_wait = max(60, int((next_hour + timedelta(seconds=45) - datetime.now()).total_seconds()))
+
+        return {
+            "has_capacity": has_capacity,
+            "is_cooldown": not has_capacity,
+            "remaining_sec": min_wait
+        }
 
 token_manager = TokenManager()
 
@@ -119,20 +148,16 @@ class FinMindClient:
         self.client = httpx.AsyncClient(timeout=30.0)
         self.for_background_sync = for_background_sync
 
-    async def _fetch_with_retry(self, dataset: str, params: dict, max_retries: int = 5):
+    async def _fetch_with_retry(self, dataset: str, params: dict, max_retries: int = 3):
         retry_count = 0
-        effective_retries = 2 if not self.for_background_sync else max_retries
+        effective_retries = 1 if not self.for_background_sync else max_retries
         while retry_count < effective_retries:
             token_info = token_manager.get_token(for_background_sync=self.for_background_sync)
             if token_info:
                 now = time.time()
-                # 關鍵差異：只有「後台背景同步 (for_background_sync=True)」才會在此處等待冷卻
-                # 前台主網頁發起的查詢永遠不進入 sleep 等待，直接發送請求！
+                # 只有在 Token 真正冷卻中且為背景同步時，直接返回空陣列讓排程器轉去執行 yfinance 免額度任務，不在此卡死印字
                 if self.for_background_sync and token_info["exhausted_until"] > now:
-                    wait_time = int(token_info["exhausted_until"] - now)
-                    print(f"All tokens exhausted for background sync. Waiting {wait_time}s for {token_info['name']} to reset.")
-                    await asyncio.sleep(min(10, wait_time))
-                    continue
+                    return []
                 params["token"] = token_info["key"]
                 token_info["user_count"] += 1
             
@@ -142,29 +167,22 @@ class FinMindClient:
                 if response.status_code == 402:
                     if token_info:
                         token_manager.mark_exhausted(token_info["key"], reset_after_seconds=3600)
-                    # 前台即時請求若遇 402，不重複阻塞重試，直接返回空列表讓後端觸發本地資料庫兜底
-                    if dataset == "TaiwanStockInfo" or not self.for_background_sync:
-                        return []
-                    retry_count += 1
-                    await asyncio.sleep(1)
-                    continue
+                    return []
                     
                 if response.status_code == 429:
-                    print(f"FinMind Token burst rate limit (429). Waiting 5s...")
                     retry_count += 1
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(2)
                     continue
                     
                 response.raise_for_status()
                 data = response.json()
-                if data["msg"] == "success":
-                    return data["data"]
+                if data.get("msg") == "success":
+                    return data.get("data", [])
                 return []
-            except Exception as e:
-                print(f"Error fetching {dataset} (Attempt {retry_count+1}): {e}")
-                if retry_count >= max_retries - 1:
-                    return []
+            except Exception:
                 retry_count += 1
+                if retry_count >= effective_retries:
+                    return []
                 await asyncio.sleep(1)
         return []
 

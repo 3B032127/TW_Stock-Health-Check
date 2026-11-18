@@ -84,14 +84,24 @@ async def sync_stocks_info(db: Session):
         processed_ids = set()
         
         for item in data:
-            sid = item["stock_id"]
+            sid = item.get("stock_id", "")
             if sid in processed_ids:
                 continue
             processed_ids.add(sid)
             
-            name = item["stock_name"]
-            industry = item["industry_category"]
-            m_type = item["type"]
+            m_type = item.get("type", "")
+            industry = item.get("industry_category", "")
+            name = item.get("stock_name", "")
+
+            # 嚴格純淨化過濾：只收錄「目前上市」普通股個股 (排除 ETF、ETN、下市、上櫃、興櫃等)
+            if m_type != "twse":
+                continue
+            if len(sid) != 4 or not sid.isdigit():
+                continue
+            if industry in ('ETF', 'ETN', 'Index', '大盤', '存託憑證', '受益證券'):
+                continue
+            if sid.startswith('00') or sid.startswith('02'):
+                continue
             
             sub_ind = categorize_stock(sid, name, industry)
             

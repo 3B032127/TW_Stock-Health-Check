@@ -1,6 +1,6 @@
 import os
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 from .. import models
 
 def get_database_file_size() -> float:
@@ -16,14 +16,7 @@ def get_database_file_size() -> float:
     return 0.0
 
 def get_db_summary(db: Session) -> dict:
-    f_stocks = db.query(models.FinancialStatement.stock_id).distinct().all()
-    p_stocks = db.query(models.StockPriceDaily.stock_id).distinct().all()
-    c_stocks = db.query(models.ChipsDaily.stock_id).distinct().all()
-    d_stocks = db.query(models.Dividend.stock_id).distinct().all()
-    s_stocks = db.query(models.SyncMetadata.stock_id).distinct().all()
-    
-    unique_stocks = set([x[0] for x in f_stocks + p_stocks + c_stocks + d_stocks + s_stocks])
-    total_stocks = len(unique_stocks)
+    total_stocks = db.query(models.Stock).count()
     
     # Total rows in key tables
     financial_rows = db.query(func.count(models.FinancialStatement.id)).scalar() or 0
@@ -33,10 +26,104 @@ def get_db_summary(db: Session) -> dict:
     
     total_records = financial_rows + price_rows + chips_rows + dividend_rows
 
+    # 針對目前正常上市在市公司（排除下市、被併購消滅、ETF/ETN等）統計數量與完整性
+    active_stats_query = """
+    WITH active_stocks AS (
+        SELECT DISTINCT s.stock_id 
+        FROM stocks s
+        LEFT JOIN stock_prices_daily p ON s.stock_id = p.stock_id
+        LEFT JOIN market_cap_cache m ON s.stock_id = m.stock_id
+        WHERE s.market_type = 'twse'
+          AND length(s.stock_id) = 4
+          AND s.stock_id GLOB '[0-9][0-9][0-9][0-9]'
+          AND s.industry NOT IN ('ETF', 'ETN', 'Index', '大盤', '存託憑證', '受益證券')
+          AND (p.stock_id IS NOT NULL OR (m.market_cap IS NOT NULL AND m.market_cap > 0))
+    ),
+    fin_ready AS (
+        SELECT stock_id FROM financial_reports GROUP BY stock_id HAVING COUNT(*) >= 8
+    ),
+    div_ready AS (
+        SELECT stock_id FROM dividends GROUP BY stock_id HAVING COUNT(*) >= 3
+    ),
+    price_ready AS (
+        SELECT stock_id FROM stock_prices_daily GROUP BY stock_id HAVING COUNT(*) >= 250
+    ),
+    chips_ready AS (
+        SELECT stock_id FROM chips_daily GROUP BY stock_id HAVING COUNT(*) >= 60
+    )
+    SELECT 
+        (SELECT COUNT(*) FROM active_stocks) as active_total,
+        (SELECT COUNT(*) FROM active_stocks WHERE stock_id IN (SELECT stock_id FROM fin_ready)) as fin_count,
+        (SELECT COUNT(*) FROM active_stocks WHERE stock_id IN (SELECT stock_id FROM div_ready)) as div_count,
+        (SELECT COUNT(*) FROM active_stocks WHERE stock_id IN (SELECT stock_id FROM price_ready)) as price_count,
+        (SELECT COUNT(*) FROM active_stocks WHERE stock_id IN (SELECT stock_id FROM chips_ready)) as chips_count,
+        (SELECT COUNT(*) FROM active_stocks 
+         WHERE stock_id IN (SELECT stock_id FROM fin_ready)
+           AND stock_id IN (SELECT stock_id FROM div_ready)
+           AND stock_id IN (SELECT stock_id FROM price_ready)
+           AND stock_id IN (SELECT stock_id FROM chips_ready)
+        ) as full_ready_count
+    """
+    try:
+        row = db.execute(text(active_stats_query)).fetchone()
+        active_total = row[0] or 0
+        fin_count = row[1] or 0
+        div_count = row[2] or 0
+        price_count = row[3] or 0
+        chips_count = row[4] or 0
+        full_ready_count = row[5] or 0
+        
+        market_stats = {
+            "activeTwseTotal": active_total,
+            "localActiveCount": active_total,
+            "fullReadyCount": full_ready_count,
+            "fullReadyPct": round(full_ready_count / max(1, active_total) * 100, 1),
+            "dimensions": {
+                "financials": {
+                    "label": "季報財報三表",
+                    "count": fin_count,
+                    "target": active_total,
+                    "pct": round(fin_count / max(1, active_total) * 100, 1),
+                    "standard": "8+ 季歷史季報與最新財報"
+                },
+                "prices": {
+                    "label": "5年歷史日K與最新收盤",
+                    "count": price_count,
+                    "target": active_total,
+                    "pct": round(price_count / max(1, active_total) * 100, 1),
+                    "standard": "250+ 天 5 年歷史日K與最新價"
+                },
+                "chips": {
+                    "label": "三大法人買賣超籌碼",
+                    "count": chips_count,
+                    "target": active_total,
+                    "pct": round(chips_count / max(1, active_total) * 100, 1),
+                    "standard": "60+ 天外資/投信/自營商歷史與最新"
+                },
+                "dividends": {
+                    "label": "歷年股利分派政策",
+                    "count": div_count,
+                    "target": active_total,
+                    "pct": round(div_count / max(1, active_total) * 100, 1),
+                    "standard": "3+ 年歷年現金與股票股利"
+                }
+            }
+        }
+    except Exception as e:
+        print(f"Error computing marketStats: {e}")
+        market_stats = {
+            "activeTwseTotal": total_stocks,
+            "localActiveCount": total_stocks,
+            "fullReadyCount": 0,
+            "fullReadyPct": 0.0,
+            "dimensions": {}
+        }
+
     return {
         "fileSizeMb": get_database_file_size(),
         "totalStocks": total_stocks,
         "totalRecords": total_records,
+        "marketStats": market_stats,
         "tableCounts": {
             "financials": financial_rows,
             "prices": price_rows,
@@ -139,13 +226,9 @@ def get_all_stocks_stats(db: Session) -> list:
     price_counts = dict(db.query(models.StockPriceDaily.stock_id, func.count(models.StockPriceDaily.id)).group_by(models.StockPriceDaily.stock_id).all())
     chips_counts = dict(db.query(models.ChipsDaily.stock_id, func.count(models.ChipsDaily.id)).group_by(models.ChipsDaily.stock_id).all())
     dividend_counts = dict(db.query(models.Dividend.stock_id, func.count(models.Dividend.id)).group_by(models.Dividend.stock_id).all())
-    # Get all unique stock_ids across all dictionaries
-    all_stock_ids = set()
-    all_stock_ids.update(stocks_meta.keys())
-    all_stock_ids.update(financial_counts.keys())
-    all_stock_ids.update(price_counts.keys())
-    all_stock_ids.update(chips_counts.keys())
-    all_stock_ids.update(dividend_counts.keys())
+    # 僅針對目前正式收錄的在市上市股票進行統計
+    valid_stocks = db.query(models.Stock).all()
+    all_stock_ids = set(s.stock_id for s in valid_stocks)
     
     # Batch fetch market caps and latest prices to prevent N+1 query overhead
     mc_caches = db.query(models.MarketCapCache).all()

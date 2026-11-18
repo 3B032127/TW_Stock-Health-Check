@@ -6,9 +6,8 @@
   2. 歷史股利 (10年：現金股利、股票股利) - FinMind
   3. 歷史股價 (5年日K線：開高低收量) - 優先 yfinance（零消耗 API 額度，極速入庫）
   4. 三大法人 (1~2年日線：外資、投信、自營商買賣超) - FinMind
-- 細粒度 Smart Skip 智慧跳過：已完善的維度秒跳過，絕不浪費 API 額度
-- 智慧雙金鑰額度切換與冷卻倒數 (保留額度供前台網站即時使用)
-- 終端機動態四維度進度儀表板 (TUI Dashboard)
+- 智慧異步排程：FinMind 額度冷卻時，免額度的 yfinance 股價任務持續高速執行，不浪費任何等待時間！
+- 終端機動態固定儀表板：單頁固定刷新、不增行、不拉長畫面，冷卻時間直接在 Token 狀態行顯示。
 """
 
 import warnings
@@ -21,8 +20,10 @@ import math
 import signal
 import asyncio
 import argparse
+import logging
+import contextlib
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -62,6 +63,24 @@ C_CURSOR_HIDE = "\033[?25l"
 C_CURSOR_SHOW = "\033[?25h"
 
 
+def fetch_yf_history_silent(ticker_sym: str):
+    """
+    從 yfinance 靜默抓取 5 年歷史日K線。
+    將 stdout、stderr 及 logging 導向 devnull，徹底避免 'No data found, symbol may be delisted' 等雜訊破壞終端 TUI 畫面。
+    """
+    with open(os.devnull, "w") as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            import yfinance as yf
+            logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+            logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+            try:
+                t = yf.Ticker(ticker_sym)
+                df = t.history(period="5y")
+                return df
+            except Exception:
+                return None
+
+
 class SyncDashboard:
     """Manages the multi-dimensional terminal TUI dashboard state and rendering."""
     def __init__(self, plain_mode: bool = False, sync_mode: str = "all"):
@@ -99,14 +118,13 @@ class SyncDashboard:
         # Cooldown metrics
         self.is_cooldown = False
         self.cooldown_remaining_sec = 0
-        self.cooldown_total_sec = 0
         self.cooldown_resume_time_str = ""
         
-        # Log buffer (keeps last 8 entries)
+        # Log buffer (keeps last 6 entries)
         self.logs: List[str] = []
         
         # Terminal dimensions
-        self.term_width = 80
+        self.term_width = 85
         self._update_term_size()
 
     def _update_term_size(self):
@@ -120,12 +138,12 @@ class SyncDashboard:
         ts = datetime.now().strftime("%H:%M:%S")
         entry = f"[{ts}] {msg}"
         self.logs.append(entry)
-        if len(self.logs) > 8:
+        if len(self.logs) > 6:
             self.logs.pop(0)
         if self.plain_mode:
             print(entry, flush=True)
 
-    def format_progress_bar(self, current: int, total: int, width: int = 20) -> str:
+    def format_progress_bar(self, current: int, total: int, width: int = 18) -> str:
         if total <= 0:
             return "[" + "░" * width + "]   0.0%"
         ratio = min(1.0, max(0.0, current / total))
@@ -150,12 +168,16 @@ class SyncDashboard:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Status badge
-        if self.is_cooldown:
+        if self.status == "RUNNING" and self.is_cooldown:
             m = self.cooldown_remaining_sec // 60
             s = self.cooldown_remaining_sec % 60
-            status_badge = f"{C_YELLOW}{C_BOLD}[🟡 冷卻休眠中 ({m:02d}:{s:02d})]{C_RESET}"
+            status_badge = f"{C_YELLOW}{C_BOLD}[🟡 API冷卻中 ({m:02d}:{s:02d}) | 免額度股價持續同步中]{C_RESET}"
         elif self.status == "RUNNING":
-            status_badge = f"{C_GREEN}{C_BOLD}[🟢 歷史同步中 (模式: {self.sync_mode})]{C_RESET}"
+            status_badge = f"{C_GREEN}{C_BOLD}[🟢 全維度同步中 (模式: {self.sync_mode})]{C_RESET}"
+        elif self.status == "WAITING_COOLDOWN":
+            m = self.cooldown_remaining_sec // 60
+            s = self.cooldown_remaining_sec % 60
+            status_badge = f"{C_YELLOW}{C_BOLD}[🟡 API冷卻休眠中 ({m:02d}:{s:02d})]{C_RESET}"
         elif self.status == "CHECKING":
             status_badge = f"{C_CYAN}{C_BOLD}[🔵 檢查額度中]{C_RESET}"
         elif self.status == "COMPLETED":
@@ -172,36 +194,31 @@ class SyncDashboard:
         buf.append(f"{C_CYAN}╚{'═' * (w - 2)}╝{C_RESET}{C_ERASE_LINE}")
 
         # Meta line
-        buf.append(f" 狀態: {status_badge}  |  運行時間: {C_BOLD}{uptime}{C_RESET}  |  時間: {C_DIM}{now_str}{C_RESET}{C_ERASE_LINE}")
+        buf.append(f" 狀態: {status_badge}  |  運行: {C_BOLD}{uptime}{C_RESET}  |  時間: {C_DIM}{now_str}{C_RESET}{C_ERASE_LINE}")
         buf.append(f"{C_DIM}{'─' * w}{C_RESET}{C_ERASE_LINE}")
 
-        # API Quota Section
-        quota_bar = self.format_progress_bar(self.api_used, self.api_limit, width=18)
-        buf.append(f"{C_BOLD}[FinMind API 額度監控]{C_RESET} {C_DIM}(保留 {token_manager.reserved_for_web * len(token_manager.tokens)} 次供前台網頁即時使用){C_RESET}{C_ERASE_LINE}")
-        buf.append(f" • Token狀態: {C_CYAN}{self.api_status_str}{C_RESET}{C_ERASE_LINE}")
-        buf.append(f" • 額度使用: {quota_bar} ({self.api_used}/{self.api_limit} 次, 剩餘 {C_BOLD}{self.api_remaining}{C_RESET} 次){C_ERASE_LINE}")
-
-        # Cooldown box if active
+        # API Quota Section - 固定單行顯示冷卻時間，絕不向下拉長
+        quota_bar = self.format_progress_bar(self.api_used, self.api_limit, width=16)
+        cd_info = ""
         if self.is_cooldown:
-            cd_bar = self.format_progress_bar(
-                self.cooldown_total_sec - self.cooldown_remaining_sec,
-                self.cooldown_total_sec,
-                width=20
-            )
-            buf.append(f"\n{C_YELLOW}{C_BOLD}[冷卻倒數計時]{C_RESET}{C_ERASE_LINE}")
             m = self.cooldown_remaining_sec // 60
             s = self.cooldown_remaining_sec % 60
-            buf.append(f" • 剩餘冷卻時間: {C_YELLOW}{C_BOLD}{m:02d} 分 {s:02d} 秒{C_RESET} (預計於 {self.cooldown_resume_time_str} 重置恢復){C_ERASE_LINE}")
-            buf.append(f" • 倒數進度: {cd_bar} | 保持背景開啟，重置後將自動接續...{C_ERASE_LINE}")
+            cd_info = f" {C_YELLOW}(🟡 冷卻中，剩餘 {m:02d}:{s:02d} 重置，yfinance 免額度持續執行){C_RESET}"
+        else:
+            cd_info = f" {C_GREEN}(🟢 正常調度中){C_RESET}"
+
+        buf.append(f"{C_BOLD}[FinMind API 額度監控]{C_RESET} {C_DIM}(保留 {token_manager.reserved_for_web * len(token_manager.tokens)} 次供前台網站即時使用){C_RESET}{C_ERASE_LINE}")
+        buf.append(f" • Token狀態: {C_CYAN}{self.api_status_str}{C_RESET}{cd_info}{C_ERASE_LINE}")
+        buf.append(f" • 額度使用: {quota_bar} ({self.api_used}/{self.api_limit} 次, 剩餘 {C_BOLD}{self.api_remaining}{C_RESET} 次){C_ERASE_LINE}")
 
         # Multi-Dimensional Progress Section
         buf.append(f"\n{C_BOLD}[全市場資料庫完善度] {C_DIM}(目標共 {self.total_stocks} 檔上市普通股){C_RESET}{C_ERASE_LINE}")
         tot = max(1, self.total_stocks)
-        p_fin = self.format_progress_bar(self.fin_ready, tot, width=18)
-        p_div = self.format_progress_bar(self.div_ready, tot, width=18)
-        p_pri = self.format_progress_bar(self.price_ready, tot, width=18)
-        p_chi = self.format_progress_bar(self.chips_ready, tot, width=18)
-        p_all = self.format_progress_bar(self.completed_stocks, tot, width=18)
+        p_fin = self.format_progress_bar(self.fin_ready, tot, width=16)
+        p_div = self.format_progress_bar(self.div_ready, tot, width=16)
+        p_pri = self.format_progress_bar(self.price_ready, tot, width=16)
+        p_chi = self.format_progress_bar(self.chips_ready, tot, width=16)
+        p_all = self.format_progress_bar(self.completed_stocks, tot, width=16)
 
         buf.append(f" • 總體股票進度: {p_all} ({self.completed_stocks} / {self.total_stocks} 檔){C_ERASE_LINE}")
         buf.append(f"   ├─ 季報財報: {p_fin} ({self.fin_ready}/{self.total_stocks} 檔已具備 8+ 季){C_ERASE_LINE}")
@@ -220,23 +237,25 @@ class SyncDashboard:
             buf.append(f" • 當前步驟: {self.current_step}{C_ERASE_LINE}")
         else:
             buf.append(f" • 標的: {C_DIM}(等待中){C_RESET}{C_ERASE_LINE}")
+            buf.append(f" • 當前步驟: {self.current_step or '準備中...'}{C_ERASE_LINE}")
 
-        # Logs Section
+        # Logs Section - 固定高度 6 行
         buf.append(f"\n{C_BOLD}[即時執行日誌 (最新 {len(self.logs)} 筆)]{C_RESET}{C_ERASE_LINE}")
         buf.append(f"{C_DIM}┌{'─' * (w - 2)}┐{C_RESET}{C_ERASE_LINE}")
-        if not self.logs:
-            buf.append(f"{C_DIM}│  尚無日誌記錄...{' ' * max(0, w - 20)}│{C_RESET}{C_ERASE_LINE}")
-        else:
-            for l in self.logs[-6:]:
-                clean_l = l[:w - 4]
+        recent_logs = self.logs[-6:]
+        for i in range(6):
+            if i < len(recent_logs):
+                clean_l = recent_logs[i][:w - 4]
                 pad = max(0, w - 4 - len(clean_l.encode('gbk', 'ignore')))
                 buf.append(f"{C_DIM}│{C_RESET} {clean_l}{' ' * pad} {C_DIM}│{C_RESET}{C_ERASE_LINE}")
+            else:
+                buf.append(f"{C_DIM}│{' ' * (w - 2)}│{C_RESET}{C_ERASE_LINE}")
         buf.append(f"{C_DIM}└{'─' * (w - 2)}┘{C_RESET}{C_ERASE_LINE}")
 
         # Footer
         buf.append(f"{C_DIM}提示: 按 Ctrl+C 可隨時中止運作 (進度即時寫入 SQLite 資料庫){C_RESET}{C_ERASE_LINE}")
 
-        # Render all in one write without scrolling
+        # Render all in one single write without scrolling or stretching
         sys.stdout.write("\n".join(buf) + "\n")
         sys.stdout.flush()
 
@@ -245,7 +264,7 @@ class FinancialSyncDaemon:
     def __init__(
         self,
         cooldown_threshold: int = 550,
-        stock_interval: float = 0.5,
+        stock_interval: float = 0.3,
         limit: Optional[int] = None,
         force: bool = False,
         plain: bool = False,
@@ -259,6 +278,13 @@ class FinancialSyncDaemon:
         self.is_running = True
         self.dashboard = SyncDashboard(plain_mode=plain, sync_mode=self.mode)
         
+        # 追蹤本輪已嘗試或已標記下市標的，防止重複卡死或無限輪詢
+        self.attempted_finance: Set[str] = set()
+        self.attempted_dividend: Set[str] = set()
+        self.attempted_price: Set[str] = set()
+        self.attempted_chips: Set[str] = set()
+        self.delisted_stocks: Set[str] = set()
+
         # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -354,17 +380,15 @@ class FinancialSyncDaemon:
             self.dashboard.api_limit = total_limit
             self.dashboard.api_remaining = max(0, total_limit - total_used)
             
-            active_available = [
-                t for t in token_manager.tokens 
-                if (t["limit"] - t["user_count"]) > token_manager.reserved_for_web
-            ]
-            has_capacity = len(active_available) > 0
+            cd_status = token_manager.get_cooldown_status()
+            self.dashboard.is_cooldown = cd_status["is_cooldown"]
+            self.dashboard.cooldown_remaining_sec = cd_status["remaining_sec"]
             
             return {
                 "used": total_used,
                 "limit": total_limit,
                 "remaining": self.dashboard.api_remaining,
-                "has_capacity": has_capacity
+                "has_capacity": cd_status["has_capacity"]
             }
         except Exception as e:
             self.dashboard.add_log(f"更新 API 額度失敗: {e}")
@@ -372,30 +396,47 @@ class FinancialSyncDaemon:
 
     def need_finance(self, db: Session, stock_id: str) -> bool:
         if self.mode not in ("all", "finance"): return False
-        if self.force: return True
+        if stock_id in self.attempted_finance or stock_id in self.delisted_stocks: return False
+        if not self.force:
+            meta = db.query(models.SyncMetadata).filter_by(stock_id=stock_id, data_type="finance").first()
+            if meta and meta.last_updated and (time.time() - meta.last_updated < 86400):
+                return False
         count = db.query(models.FinancialStatement).filter_by(stock_id=stock_id).count()
         return count < 8
 
     def need_dividend(self, db: Session, stock_id: str) -> bool:
         if self.mode not in ("all", "dividend"): return False
-        if self.force: return True
+        if stock_id in self.attempted_dividend or stock_id in self.delisted_stocks: return False
+        if not self.force:
+            meta = db.query(models.SyncMetadata).filter_by(stock_id=stock_id, data_type="dividends").first()
+            if meta and meta.last_updated and (time.time() - meta.last_updated < 86400):
+                return False
         count = db.query(models.Dividend).filter_by(stock_id=stock_id).count()
         return count < 3
 
     def need_price(self, db: Session, stock_id: str) -> bool:
         if self.mode not in ("all", "price"): return False
-        if self.force: return True
+        if stock_id in self.attempted_price or stock_id in self.delisted_stocks: return False
+        if not self.force:
+            meta = db.query(models.SyncMetadata).filter_by(stock_id=stock_id, data_type="price").first()
+            if meta and meta.last_updated and (time.time() - meta.last_updated < 86400):
+                return False
         count = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id).count()
         return count < 250
 
     def need_chips(self, db: Session, stock_id: str) -> bool:
         if self.mode not in ("all", "chips"): return False
-        if self.force: return True
+        if stock_id in self.attempted_chips or stock_id in self.delisted_stocks: return False
+        if not self.force:
+            meta = db.query(models.SyncMetadata).filter_by(stock_id=stock_id, data_type="chips").first()
+            if meta and meta.last_updated and (time.time() - meta.last_updated < 86400):
+                return False
         count = db.query(models.ChipsDaily).filter_by(stock_id=stock_id).count()
         return count < 60
 
     async def sync_stock_finance(self, db: Session, stock_id: str) -> bool:
         """Sync Income Statement, Balance Sheet, Cash Flow (10 years)."""
+        self.attempted_finance.add(stock_id)
         self.dashboard.current_step = "[1/4] 抓取季報財報三表 (10年)..."
         self.dashboard.render()
         _, inc = await get_income_statement_history(db, stock_id, limit=40, force_sync=True, for_background_sync=True)
@@ -414,6 +455,7 @@ class FinancialSyncDaemon:
 
     async def sync_stock_dividend(self, db: Session, stock_id: str) -> int:
         """Sync 10 years of historical dividend policy via FinMind."""
+        self.attempted_dividend.add(stock_id)
         self.dashboard.current_step = "[2/4] 抓取歷史股利政策 (10年)..."
         self.dashboard.render()
         client = FinMindClient(for_background_sync=True)
@@ -461,16 +503,16 @@ class FinancialSyncDaemon:
         Priority: yfinance (FREE, NO FinMind token consumption, ultra-fast!).
         Fallback: FinMind fetch_price.
         """
+        self.attempted_price.add(stock_id)
         self.dashboard.current_step = "[3/4] 抓取5年歷史股價 (yfinance 免額度優先)..."
         self.dashboard.render()
 
         added = 0
         # 1. 優先使用 yfinance 抓取 5 年日 K 線 (約 1250 筆)
         try:
-            import yfinance as yf
             for suffix in [".TW", ".TWO"]:
                 ticker_sym = f"{stock_id}{suffix}"
-                df = await asyncio.to_thread(lambda: yf.Ticker(ticker_sym).history(period="5y"))
+                df = await asyncio.to_thread(fetch_yf_history_silent, ticker_sym)
                 if df is not None and not df.empty:
                     for idx, row in df.iterrows():
                         date_str = idx.strftime("%Y-%m-%d")
@@ -489,16 +531,13 @@ class FinancialSyncDaemon:
                             added += 1
                     db.commit()
                     break
-        except Exception as yf_err:
+        except Exception:
             pass
 
         # 2. 若 yfinance 無法取得且 FinMind 額度充足，回退 FinMind 補齊
         if added == 0:
-            active_tokens = [
-                t for t in token_manager.tokens 
-                if (t["limit"] - t["user_count"]) > token_manager.reserved_for_web and t["exhausted_until"] <= time.time()
-            ]
-            if active_tokens:
+            cd_status = token_manager.get_cooldown_status()
+            if cd_status["has_capacity"]:
                 client = FinMindClient(for_background_sync=True)
                 end_date = datetime.now().strftime("%Y-%m-%d")
                 start_date = (datetime.now() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
@@ -535,12 +574,12 @@ class FinancialSyncDaemon:
 
     async def sync_stock_chips(self, db: Session, stock_id: str) -> int:
         """Sync 1~2 years of Institutional Investor Buy/Sell records via FinMind."""
+        self.attempted_chips.add(stock_id)
         self.dashboard.current_step = "[4/4] 抓取三大法人籌碼買賣超 (1年)..."
         self.dashboard.render()
 
         client = FinMindClient(for_background_sync=True)
         end_date = datetime.now().strftime("%Y-%m-%d")
-        # 抓取 365 天法人籌碼
         start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         try:
             data_list = await client.fetch_chips(stock_id, start_date, end_date)
@@ -579,46 +618,6 @@ class FinancialSyncDaemon:
         db.commit()
         return added
 
-    async def run_cooldown(self):
-        """Enter cooldown sleep mode until FinMind resets at the top of the hour."""
-        self.dashboard.is_cooldown = True
-        self.dashboard.status = "COOLDOWN"
-        
-        now = datetime.now()
-        next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-        target_resume_time = next_hour + timedelta(seconds=45)
-        
-        wait_seconds = int((target_resume_time - now).total_seconds())
-        if wait_seconds < 60:
-            wait_seconds += 3600
-            target_resume_time += timedelta(hours=1)
-            
-        self.dashboard.cooldown_total_sec = wait_seconds
-        self.dashboard.cooldown_remaining_sec = wait_seconds
-        self.dashboard.cooldown_resume_time_str = target_resume_time.strftime("%H:%M:%S")
-        
-        self.dashboard.add_log(f"FinMind API 額度吃緊 ({self.dashboard.api_used}/{self.dashboard.api_limit})，進入冷卻模式")
-        self.dashboard.add_log(f"預計於 {self.dashboard.cooldown_resume_time_str} 重置並自動恢復 (倒數 {wait_seconds // 60} 分鐘)")
-        
-        poll_interval = 0
-        while self.is_running and self.dashboard.cooldown_remaining_sec > 0:
-            self.dashboard.render()
-            await asyncio.sleep(1)
-            self.dashboard.cooldown_remaining_sec -= 1
-            poll_interval += 1
-            
-            if poll_interval >= 60:
-                poll_interval = 0
-                q = await self.update_api_quota()
-                if q.get("has_capacity", False):
-                    self.dashboard.add_log(f"偵測到 API 已提早獲得可用額度，恢復同步！")
-                    break
-
-        await self.update_api_quota()
-        self.dashboard.is_cooldown = False
-        self.dashboard.status = "RUNNING"
-        self.dashboard.add_log("冷卻結束，自動恢復歷史數據同步！")
-
     async def run(self):
         """Main loop for the daemon."""
         if not self.dashboard.plain_mode:
@@ -628,7 +627,7 @@ class FinancialSyncDaemon:
         db = SessionLocal()
         try:
             self.dashboard.status = "CHECKING"
-            self.dashboard.add_log("正在分析目前資料庫完善現況...")
+            self.dashboard.current_step = "正在分析目前資料庫完善現況..."
             self.dashboard.render()
             
             stocks = self.get_twse_operating_stocks(db)
@@ -644,109 +643,159 @@ class FinancialSyncDaemon:
             self.dashboard.render()
             
             self.dashboard.status = "RUNNING"
-            for stock in stocks:
-                if not self.is_running:
-                    break
-                    
-                stock_id = stock["stock_id"]
-                name = stock["name"]
-                self.dashboard.current_stock_id = stock_id
-                self.dashboard.current_stock_name = name
-                self.dashboard.current_stock_industry = stock["industry"]
-                self.dashboard.current_market_cap = stock["market_cap"]
-                self.dashboard.current_market_cap_rank = stock["rank"]
+            
+            # 多輪排程器：直到所有標的與維度全數完善
+            while self.is_running:
+                any_task_remaining = False
+                stocks_completed_count = 0
                 
-                # 判斷這檔股票是否需要執行任何同步
-                need_f = self.need_finance(db, stock_id)
-                need_d = self.need_dividend(db, stock_id)
-                need_p = self.need_price(db, stock_id)
-                need_c = self.need_chips(db, stock_id)
+                for stock in stocks:
+                    if not self.is_running:
+                        break
+                        
+                    stock_id = stock["stock_id"]
+                    name = stock["name"]
+                    self.dashboard.current_stock_id = stock_id
+                    self.dashboard.current_stock_name = name
+                    self.dashboard.current_stock_industry = stock["industry"]
+                    self.dashboard.current_market_cap = stock["market_cap"]
+                    self.dashboard.current_market_cap_rank = stock["rank"]
+                    
+                    need_f = self.need_finance(db, stock_id)
+                    need_d = self.need_dividend(db, stock_id)
+                    need_p = self.need_price(db, stock_id)
+                    need_c = self.need_chips(db, stock_id)
 
-                if not (need_f or need_d or need_p or need_c):
-                    self.dashboard.completed_stocks += 1
-                    self.dashboard.skipped_stocks += 1
-                    self.dashboard.current_step = "各維度數據已完善，直接略過"
-                    self.dashboard.render()
-                    await asyncio.sleep(0.01)
-                    continue
+                    if not (need_f or need_d or need_p or need_c):
+                        stocks_completed_count += 1
+                        continue
 
-                # 若需要消耗 FinMind API（財報、股利、籌碼），檢查額度
-                if need_f or need_d or need_c:
-                    active_tokens = [
-                        t for t in token_manager.tokens 
-                        if (t["limit"] - t["user_count"]) > token_manager.reserved_for_web and t["exhausted_until"] <= time.time()
-                    ]
-                    if not active_tokens:
-                        # 如果需要股價，先藉由 yfinance 抓取（免額度）
-                        if need_p:
+                    any_task_remaining = True
+                    synced_actions = []
+
+                    # 🌟 核心智慧分支 1：歷史股價 (yfinance 免額度優先)
+                    # 關鍵：不依賴 FinMind API！無論 FinMind 是否處於冷卻中，永遠立即執行，零等待！
+                    if need_p:
+                        try:
                             p_cnt = await self.sync_stock_price_yfinance(db, stock_id)
                             if p_cnt > 0:
                                 self.dashboard.price_ready += 1
-                                self.dashboard.add_log(f"[{stock_id} {name}] yfinance 成功補齊 5 年股價 ({p_cnt} 筆K線)")
-                            need_p = False
+                                synced_actions.append(f"5年股價{p_cnt}筆(免額度)")
+                            else:
+                                existing_cnt = db.query(models.StockPriceDaily).filter_by(stock_id=stock_id).count()
+                                if existing_cnt == 0:
+                                    self.delisted_stocks.add(stock_id)
+                                    self.dashboard.add_log(f"[{stock_id} {name}] 查無歷史股價 (已跳過，可能已下市或代碼變更)")
+                                else:
+                                    self.attempted_price.add(stock_id)
+                                    self.dashboard.price_ready += 1
+                                    synced_actions.append(f"股價{existing_cnt}筆(已達上限)")
+                        except Exception as e:
+                            self.dashboard.add_log(f"[{stock_id}] yfinance 股價錯誤: {e}")
 
-                        self.dashboard.add_log(f"FinMind 額度達保留門檻，進入冷卻模式")
-                        await self.run_cooldown()
-                        if not self.is_running:
-                            break
+                    # 🌟 核心智慧分支 2：需要消耗 FinMind API 的任務 (季報、股利、三大法人)
+                    needs_finmind = need_f or need_d or need_c
+                    if needs_finmind:
+                        cd_status = token_manager.get_cooldown_status()
+                        if cd_status["has_capacity"]:
+                            self.dashboard.is_cooldown = False
+                            
+                            # 1. 季報財報
+                            if need_f:
+                                try:
+                                    ok = await self.sync_stock_finance(db, stock_id)
+                                    if ok:
+                                        self.dashboard.fin_ready += 1
+                                        synced_actions.append("財報10年")
+                                    else:
+                                        self.attempted_finance.add(stock_id)
+                                except Exception as e:
+                                    self.dashboard.add_log(f"[{stock_id}] 財報同步失敗: {e}")
 
-                synced_actions = []
+                            # 2. 歷史股利
+                            if need_d:
+                                try:
+                                    d_cnt = await self.sync_stock_dividend(db, stock_id)
+                                    if d_cnt > 0:
+                                        self.dashboard.div_ready += 1
+                                        synced_actions.append(f"股利{d_cnt}筆")
+                                    else:
+                                        self.attempted_dividend.add(stock_id)
+                                except Exception as e:
+                                    self.dashboard.add_log(f"[{stock_id}] 股利同步失敗: {e}")
 
-                # 1. 季報財報
-                if need_f:
-                    try:
-                        ok = await self.sync_stock_finance(db, stock_id)
-                        if ok:
-                            self.dashboard.fin_ready += 1
-                            synced_actions.append("財報10年")
-                    except Exception as e:
-                        self.dashboard.add_log(f"[{stock_id}] 財報同步失敗: {e}")
+                            # 3. 三大法人籌碼
+                            if need_c:
+                                try:
+                                    c_cnt = await self.sync_stock_chips(db, stock_id)
+                                    if c_cnt > 0:
+                                        self.dashboard.chips_ready += 1
+                                        synced_actions.append(f"籌碼{c_cnt}筆")
+                                    else:
+                                        self.attempted_chips.add(stock_id)
+                                except Exception as e:
+                                    self.dashboard.add_log(f"[{stock_id}] 籌碼同步失敗: {e}")
+                        else:
+                            # 智慧冷卻模式：FinMind 額度用盡，更新狀態行提示冷卻剩餘時間
+                            # 絕不在此卡死！不調用 FinMind API，直接往下遍歷下一檔股票繼續跑 yfinance 免額度股價！
+                            self.dashboard.is_cooldown = True
+                            self.dashboard.cooldown_remaining_sec = cd_status["remaining_sec"]
 
-                # 2. 歷史股利
-                if need_d:
-                    try:
-                        d_cnt = await self.sync_stock_dividend(db, stock_id)
-                        if d_cnt > 0 or not self.need_dividend(db, stock_id):
-                            self.dashboard.div_ready += 1
-                            synced_actions.append(f"股利{d_cnt}筆")
-                    except Exception as e:
-                        self.dashboard.add_log(f"[{stock_id}] 股利同步失敗: {e}")
+                    # 檢查這檔股票是否已全部完成
+                    is_now_complete = not (
+                        self.need_finance(db, stock_id) or 
+                        self.need_dividend(db, stock_id) or 
+                        self.need_price(db, stock_id) or 
+                        self.need_chips(db, stock_id)
+                    )
+                    if is_now_complete:
+                        stocks_completed_count += 1
 
-                # 3. 歷史股價 (yfinance 免額度優先)
-                if need_p:
-                    try:
-                        p_cnt = await self.sync_stock_price_yfinance(db, stock_id)
-                        if p_cnt > 0 or not self.need_price(db, stock_id):
-                            self.dashboard.price_ready += 1
-                            synced_actions.append(f"股價{p_cnt}筆")
-                    except Exception as e:
-                        self.dashboard.add_log(f"[{stock_id}] 股價同步失敗: {e}")
+                    self.dashboard.completed_stocks = stocks_completed_count
 
-                # 4. 三大法人籌碼
-                if need_c:
-                    try:
-                        c_cnt = await self.sync_stock_chips(db, stock_id)
-                        if c_cnt > 0 or not self.need_chips(db, stock_id):
-                            self.dashboard.chips_ready += 1
-                            synced_actions.append(f"籌碼{c_cnt}筆")
-                    except Exception as e:
-                        self.dashboard.add_log(f"[{stock_id}] 籌碼同步失敗: {e}")
+                    if synced_actions:
+                        self.dashboard.add_log(f"[{stock_id} {name}] 完善成功: {', '.join(synced_actions)}")
+                    
+                    self.dashboard.render()
+                    
+                    if self.stock_interval > 0:
+                        await asyncio.sleep(self.stock_interval)
 
-                self.dashboard.completed_stocks += 1
-                if synced_actions:
-                    self.dashboard.add_log(f"[{stock_id} {name}] 完善成功: {', '.join(synced_actions)}")
-                
-                # 每處理 3 檔更新一次 API 額度狀態
-                if self.dashboard.completed_stocks % 3 == 0:
+                # 當一輪遍歷結束：
+                if not any_task_remaining or not self.is_running:
+                    # 全市場所有股票四維度全數完善！
+                    break
+
+                # 若跑完一輪仍有股票未完成，且 FinMind 處於冷卻狀態：
+                cd_status = token_manager.get_cooldown_status()
+                if not cd_status["has_capacity"]:
+                    # 檢查是否還有股票需要 yfinance 股價
+                    remaining_needs_price = any(self.need_price(db, s["stock_id"]) for s in stocks)
+                    if not remaining_needs_price:
+                        # 此時所有免額度任務都已全部做完，只剩 FinMind API 任務需要冷卻
+                        self.dashboard.status = "WAITING_COOLDOWN"
+                        self.dashboard.current_stock_id = ""
+                        self.dashboard.current_step = "全市場免額度股價已完工，等待 FinMind API 額度重置中..."
+                        self.dashboard.add_log("免額度股價已全數完工！API 冷卻倒數中...")
+                        
+                        while self.is_running and self.dashboard.cooldown_remaining_sec > 0:
+                            self.dashboard.render()
+                            await asyncio.sleep(1)
+                            self.dashboard.cooldown_remaining_sec -= 1
+                            if self.dashboard.cooldown_remaining_sec % 30 == 0:
+                                await self.update_api_quota()
+                                if token_manager.get_cooldown_status()["has_capacity"]:
+                                    break
+                                    
+                        self.dashboard.status = "RUNNING"
+                        self.dashboard.is_cooldown = False
+                        await self.update_api_quota()
+                else:
                     await self.update_api_quota()
 
-                self.dashboard.render()
-                
-                if self.stock_interval > 0:
-                    await asyncio.sleep(self.stock_interval)
-
             self.dashboard.status = "COMPLETED"
-            self.dashboard.current_step = "全部股票處理完畢！"
+            self.dashboard.current_stock_id = ""
+            self.dashboard.current_step = "🎉 全市場歷史數據已全數完善！"
             self.dashboard.add_log("🎉 全體 TWSE 上市公司歷史數據補齊作業完成！")
             self.dashboard.render()
 
@@ -765,7 +814,7 @@ def main():
                         help="同步模式: all(預設補齊全部缺漏), price(僅5年股價), dividend(僅股利), chips(僅籌碼), finance(僅財報)")
     parser.add_argument("--limit", type=int, default=None, help="限制同步檔數 (測試用)")
     parser.add_argument("--threshold", type=int, default=550, help="觸發冷卻的 API 上限 (預設 550/600)")
-    parser.add_argument("--interval", type=float, default=0.3, help="每檔抓取間隔秒數 (預設 0.3s)")
+    parser.add_argument("--interval", type=float, default=0.2, help="每檔抓取間隔秒數 (預設 0.2s)")
     parser.add_argument("--force", action="store_true", help="強制重新抓取已存在的股票")
     parser.add_argument("--plain", action="store_true", help="純文字日誌模式 (適合背景日誌輸出)")
     args = parser.parse_args()

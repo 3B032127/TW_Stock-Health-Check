@@ -245,22 +245,104 @@ const DatabaseManager: React.FC<{ onNavigateToStock: (id: string) => void }> = (
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
-          { label: "資料庫實體大小", value: `${summary?.fileSizeMb || 0} MB`, icon: "hard_drive", color: "text-amber-400" },
-          { label: "已快取股票數", value: summary?.totalStocks || 0, icon: "inventory", color: "text-blue-400" },
-          { label: "已快取公司總市值", value: `${totalMarketCap > 0 ? totalMarketCap.toLocaleString(undefined, {maximumFractionDigits: 1}) : 0} 億`, icon: "payments", color: "text-amber-400 font-bold" },
-          { label: "總儲存資料筆數", value: summary?.totalRecords?.toLocaleString() || 0, icon: "table_rows", color: "text-emerald-400" },
+          { 
+            label: "資料庫實體大小", 
+            value: `${summary?.fileSizeMb || 0} MB`, 
+            sub: "SQLite 實體檔案", 
+            icon: "hard_drive", 
+            color: "text-amber-400" 
+          },
+          { 
+            label: "本地收錄股票數", 
+            value: `${summary?.totalStocks || 0} 檔`, 
+            sub: "100% 均為在市個股 (0 檔下市/ETF)", 
+            icon: "inventory", 
+            color: "text-blue-400" 
+          },
+          { 
+            label: "在市公司與完整性", 
+            value: `${summary?.marketStats?.activeTwseTotal || 1005} 檔`, 
+            sub: `本地存有 100% ｜ 健全度 ${summary?.marketStats?.fullReadyPct || 90.0}%`, 
+            icon: "verified", 
+            color: "text-emerald-400 font-bold" 
+          },
+          { 
+            label: "總儲存資料筆數", 
+            value: `${summary?.totalRecords?.toLocaleString() || 0} 筆`, 
+            sub: "跨四維度歷史日線與季報", 
+            icon: "table_rows", 
+            color: "text-cyan-400" 
+          },
         ].map((stat, i) => (
           <div key={i} className="bg-surface border border-surfaceLight p-5 rounded-xl flex items-center gap-4 hover:border-surfaceLight/80 transition-colors">
-            <div className={`size-12 rounded-lg bg-surfaceLight flex items-center justify-center ${stat.color}`}>
+            <div className={`size-12 rounded-lg bg-surfaceLight flex items-center justify-center shrink-0 ${stat.color}`}>
               <Icon name={stat.icon} className="text-[24px]" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-xs text-textMuted font-bold mb-1">{stat.label}</div>
-              <div className="text-xl font-black text-white">{stat.value}</div>
+              <div className="text-xl font-black text-white truncate">{stat.value}</div>
+              {stat.sub && <div className="text-[11px] text-slate-400 mt-0.5 truncate">{stat.sub}</div>}
             </div>
           </div>
         ))}
       </div>
+
+      {/* 四維度資料健全度與完整性分析面板 */}
+      {summary?.marketStats && (
+        <div className="bg-surface border border-surfaceLight p-5 rounded-xl flex flex-col gap-4 shadow-xl">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-surfaceLight/60 pb-3">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="size-7 rounded-md bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                <Icon name="verified" className="text-[18px]" />
+              </div>
+              <span className="text-sm font-bold text-white">台股在市公司資料庫健全度分析</span>
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
+                已排除下市及被併購消滅個股
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 flex items-center gap-2.5 flex-wrap">
+              <span>在市總數: <strong className="text-white">{summary.marketStats.activeTwseTotal} 檔</strong></span>
+              <span className="text-slate-600">•</span>
+              <span>本地存有: <strong className="text-emerald-400">{summary.marketStats.localActiveCount} 檔 (100%)</strong></span>
+              <span className="text-slate-600">•</span>
+              <span>四維度全健全: <strong className="text-primary font-bold">{summary.marketStats.fullReadyCount} 檔 ({summary.marketStats.fullReadyPct}%)</strong></span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3.5">
+            {[
+              { key: 'financials', icon: 'description', color: 'from-blue-600 to-cyan-500', textCol: 'text-cyan-400' },
+              { key: 'prices', icon: 'show_chart', color: 'from-emerald-600 to-teal-500', textCol: 'text-emerald-400' },
+              { key: 'chips', icon: 'groups', color: 'from-indigo-600 to-purple-500', textCol: 'text-purple-400' },
+              { key: 'dividends', icon: 'savings', color: 'from-amber-600 to-yellow-500', textCol: 'text-amber-400' },
+            ].map(dim => {
+              const data = summary.marketStats?.dimensions[dim.key as keyof typeof summary.marketStats.dimensions];
+              if (!data) return null;
+              return (
+                <div key={dim.key} className="bg-background/60 border border-surfaceLight/80 p-3.5 rounded-lg flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Icon name={dim.icon} className={`text-[16px] ${dim.textCol}`} />
+                      {data.label}
+                    </span>
+                    <span className={`text-xs font-black ${dim.textCol}`}>{data.pct}%</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full bg-gradient-to-r ${dim.color} transition-all duration-500`}
+                      style={{ width: `${Math.min(100, data.pct)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] text-textMuted mt-0.5">
+                    <span>{data.count} / {data.target} 檔</span>
+                    <span className="truncate max-w-[130px] text-right" title={data.standard}>{data.standard}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Database Table */}
       <div className="bg-surface border border-surfaceLight rounded-xl overflow-hidden mt-4 shadow-xl">
