@@ -9,6 +9,7 @@ import { ChipsAnalysis } from '../components/stock-detail/ChipsAnalysis';
 import { HealthCheckTab } from '../components/stock-detail/HealthCheckTab';
 import { GSFactorTab } from '../components/stock-detail/GSFactorTab';
 import { GSBacktestTab } from '../components/stock-detail/GSBacktestTab';
+import { PredictionTab } from '../components/stock-detail/PredictionTab';
 import { FinancialChart } from '../components/stock-detail/FinancialChart';
 import { FinancialTable } from '../components/stock-detail/FinancialTable';
 import { AIAnalysisCard } from '../components/AIAnalysisCard';
@@ -139,6 +140,7 @@ const StockDetail: React.FC<{
             { id: StockTab.FINANCIALS, label: '財報數據' },
             { id: StockTab.GS_FACTOR, label: '因子分析 (GS)' },
             { id: StockTab.GS_BACKTEST, label: '策略回測 (GS)' },
+            { id: StockTab.PREDICTION, label: '預測 (Prediction)' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -215,6 +217,7 @@ const StockDetail: React.FC<{
       {activeTab === StockTab.HEALTH_CHECK && <HealthCheckTab stockId={stockId} />}
       {activeTab === StockTab.GS_FACTOR && <GSFactorTab stockId={stockId} />}
       {activeTab === StockTab.GS_BACKTEST && <GSBacktestTab stockId={stockId} />}
+      {activeTab === StockTab.PREDICTION && <PredictionTab stockId={stockId} />}
 
       {activeTab === StockTab.FINANCIALS && (
         <div className="flex flex-col gap-6">
