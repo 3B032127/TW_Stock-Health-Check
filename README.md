@@ -37,10 +37,28 @@
 - **因子分析 (GS Factor)**：計算 Momentum (動量)、Value (價值)、Quality (品質)、Low Volatility (低波動)、Market Beta (市場風險) 與 Smart Money (法人籌碼) 六大風格因子曝險與雷達圖。
 - **策略回測 (GS Backtest)**：以 `gs_quant.timeseries` 引擎執行多因子、均線交叉、RSI 均值回歸與 MACD 動能策略回測，產出總報酬率、年化報酬率、夏普值 (Sharpe Ratio)、最大回撤 (Max Drawdown) 與資金淨值曲線圖。
 
-### 🔄 全自動數據補齊系統 (Data Sync Daemon)
+### 🤖 雙模型融合股價預測與歷史回測 (Kronos × TimesFM 2.5 Ensemble)
+- **核心雙模型融合架構**：
+  - **主力金融基礎模型**：`NeoQuasar/Kronos-base` (512日 OHLCV 蒙地卡羅採樣 20 條路徑)。
+  - **輔助宏觀時序模型**：`google/timesfm-2.5-200m-pytorch` (512日收盤價分位數頭)。
+- **動態反比誤差權重 (Dynamic Inverse-MAPE)**：
+  - 系統每日追蹤個股過去 30 次真實回測中兩大模型 MAPE 表現，動態調整權重比例（附 30%~70% 邊界保護）。
+- **全視角驗證與預測圖表**：
+  - 支援 **「明日預測 (T-1)」** 與 **「5日波段預測 (T-5)」** 自由切換。
+  - 嚴格遵守 XTAI 台灣證交所交易日曆與 ±10% 法定漲跌停限制截斷。
+  - 直觀呈現明日/5日多空紅綠訊號卡、80% 信賴區間扇形機率錐、動態多空變色基準線與今日收盤基準標籤。
+
+### 🌐 全球跨國指數看盤艙與 ADR 監控 (Global Market Dashboard)
+- **台美日 7 大核心指數**：加權指數、費城半導體、那斯達克、標普 500、道瓊、日經 225、東證 TOPIX。
+- **盤中呼吸燈動態回饋**：開盤中末端閃爍呼吸光點，各國指數清楚標示計價幣別（TWD/USD/JPY）與真實 1D 分時 Sparkline。
+- **跨國多維排行榜與台股 ADR 監控**：支援台股、美股焦點、日股焦點與全球半導體供應鏈排行，並即時監控台積電、日月光、聯電等美股 ADR 折溢價率。
+- **全站多層智慧快取**：首頁盤後全面長效秒開，開盤期間自動背景更新，切換分頁無需重載。
+
+### 🔄 全自動數據補齊與排程系統 (Data Sync & Pipeline)
 - 終端機 TUI 動態監控看板，單頁定點刷新不洗版。
 - 自動抓取全市場上市普通股歷史數據：財報 (40季)、股利 (10年)、股價 (5年免額度)、三大法人籌碼 (1年)。
 - 雙金鑰自動切換與智慧冷卻倒數，並保留前台網頁即時使用額度。
+- **每日盤後自動化更新管線 (`run_daily_pipeline.sh`)**：全自動串聯「最新收盤價抓取 ➔ 歷史到期回填 ➔ 雙模型批次推論」。
 
 ## 🔄 自動化資料庫同步系統 (Automated Data Sync System)
 
@@ -88,6 +106,45 @@
 # 7. 限制同步檔數 (例如僅同步市值前 20 檔進行測試)
 ./sync_financials.sh --limit=20
 ```
+
+---
+
+## 📈 每日盤後自動化更新與雙模型推論管線 (Daily Prediction Pipeline)
+
+本系統支援「離線批次算力 ＋ 線上零延遲讀取」，每日收盤後（14:30 以後）可一鍵執行全自動更新管線：
+
+### 🌟 管線執行流程
+1. **日 K 線增量抓取** (`scripts/update_tw_daily_prices.py`)：使用 yfinance 批次並行拉取全市場上市櫃個股當日最新收盤行情，寫入 SQLite。
+2. **交易日檢查與防禦**：自動判定今日是否為交易日、資料是否已如期入庫，若未滿足條件則安全終止，防止在未收盤時誤跑推論。
+3. **實際價格回填 (Backfill)**：將今日真實收盤價回填到過去所有已到期的預測紀錄中，更新真實誤差。
+4. **回測指標重算 (Recompute Backtest)**：滾動重算過去 30 次歷史預測之方向勝率 (Directional Accuracy)、MAPE 與信賴區間命中率。
+5. **雙模型推論 (Kronos × TimesFM Ensemble)**：啟用 Apple Silicon MPS 加速，推論未來 5 個交易日之目標價格與區間。
+
+### 💻 每日更新指令與排程設定
+
+```bash
+# 【一鍵執行】每日收盤後全自動管線（抓取今日日 K ➔ 到期回填 ➔ 重新推論）
+./scripts/run_daily_pipeline.sh
+
+# 【單獨更新】增量補齊最近 5 天日 K 線
+./venv/bin/python scripts/update_tw_daily_prices.py --days 5
+
+# 【單獨預測】為全市場所有股票執行最新預測推論
+./venv/bin/python scripts/run_tw_predictions.py --mode daily
+
+# 【測試單股】針對特定個股單獨執行預測 (例如台積電 2330、鴻海 2317)
+./venv/bin/python scripts/run_tw_predictions.py --mode daily --symbols 2330,2317
+
+# 【歷史回填】重新回填歷史 35 天之回測基準（用於初次部署建置資料）
+./venv/bin/python scripts/run_tw_predictions.py --mode backfill --backtest-days 35
+```
+
+> [!TIP]
+> **排程建議 (Crontab)**：
+> 若在本地或常駐機器上運行，可設定每日週一至週五 14:40 自動執行：
+> ```cron
+> 40 14 * * 1-5 cd /path/to/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh >> /tmp/pipeline.log 2>&1
+> ```
 
 > [!TIP]
 > 守護程式支援安全的優雅退出（Graceful Shutdown），任何時候按下 `Ctrl + C` 均會安全寫入進度並離開，下次執行時自動接續中斷進度。
