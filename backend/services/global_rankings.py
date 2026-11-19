@@ -18,23 +18,11 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import cache_service
 from .global_indices import _yf_lock
 
-_cache: Dict[str, Tuple[float, Any]] = {}
-_cache_lock = threading.Lock()
-
-
-def _cached(key: str, ttl: float, fn):
-    now = time.time()
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit and now - hit[0] < ttl:
-            return hit[1]
-    value = fn()
-    if value is not None:
-        with _cache_lock:
-            _cache[key] = (now, value)
-    return value
+_tw_pool_mem: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+_tw_pool_lock = threading.Lock()
 
 
 ADR_SPECS: List[Dict[str, Any]] = [
@@ -247,11 +235,33 @@ def get_adr_monitor(db: Session) -> Dict[str, Any]:
             "items": items,
         }
 
-    return _cached("adr_monitor", 60, _build)
+    bucket, _, ttl = cache_service.get_multi_market_cache_bucket(["TW", "US"], live_ttl=30, closed_ttl=86400)
+    res = cache_service.get_or_set_cache(
+        f"adr_monitor:{bucket}",
+        ttl,
+        _build,
+        db=db,
+        validator_fn=lambda d: bool(d and d.get("items")),
+    )
+    return res or {"usdTwd": 32.5, "updatedAt": "", "items": []}
 
 
 def _fetch_tw_pool_from_db(db: Session, stock_ids: Optional[List[str]] = None, top_cap_limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """Build TW stock daily gain/loss pool from local SQLite StockPriceDaily (latest 2 trading days)."""
+    bucket, is_open, ttl = cache_service.get_market_cache_bucket("TW", live_ttl=30, closed_ttl=86400)
+    if stock_ids is not None:
+        scope_key = f"ids:{','.join(sorted(stock_ids))}"
+    elif top_cap_limit is not None:
+        scope_key = f"cap:{top_cap_limit}"
+    else:
+        scope_key = "all"
+    mem_key = f"{bucket}:{scope_key}"
+    now = time.time()
+    with _tw_pool_lock:
+        hit = _tw_pool_mem.get(mem_key)
+        if hit and now < hit[0]:
+            return [dict(item) for item in hit[1]]
+
     dates_rows = (
         db.query(models.StockPriceDaily.date)
         .distinct()
@@ -332,34 +342,73 @@ def _fetch_tw_pool_from_db(db: Session, stock_ids: Optional[List[str]] = None, t
             "isLimitDown": pct <= -9.8,
             "sparkline": [],
         })
-    return items
+    if items:
+        with _tw_pool_lock:
+            _tw_pool_mem[mem_key] = (time.time() + (30 if is_open else 86400), items)
+    return [dict(item) for item in items]
 
 
 def _attach_tw_sparklines(db: Session, items: List[Dict[str, Any]]) -> None:
-    """Attach genuine 15m intraday sparklines (falling back to recent 15d SQLite closes) for selected TW stocks."""
+    """Attach genuine 15m intraday sparklines (cached per TW bucket, falling back to recent 15d SQLite closes)."""
     if not items:
         return
-    yf_syms = [f"{it['id']}.TW" for it in items]
-    quotes = _batch_download_quotes(yf_syms)
+    bucket, _, ttl = cache_service.get_market_cache_bucket("TW", live_ttl=30, closed_ttl=86400)
+
+    missing_items: List[Dict[str, Any]] = []
+    seen_missing = set()
     for it in items:
-        q = quotes.get(f"{it['id']}.TW")
+        sid = it["id"]
+        cached_spark = cache_service.get_cache_entry(f"tw_spark:{sid}:{bucket}", db=db)
+        if isinstance(cached_spark, list) and len(cached_spark) >= 2:
+            it["sparkline"] = list(cached_spark)
+        else:
+            missing_items.append(it)
+            seen_missing.add(sid)
+
+    if not missing_items:
+        return
+
+    yf_syms = [f"{sid}.TW" for sid in seen_missing]
+    quotes = _batch_download_quotes(yf_syms)
+    resolved_sparks: Dict[str, List[float]] = {}
+    for sid in seen_missing:
+        q = quotes.get(f"{sid}.TW")
         if q and len(q.get("sparkline", [])) >= 2:
-            it["sparkline"] = q["sparkline"]
+            spark = q["sparkline"]
         else:
             rows = (
                 db.query(models.StockPriceDaily.close)
-                .filter(models.StockPriceDaily.stock_id == it["id"])
+                .filter(models.StockPriceDaily.stock_id == sid)
                 .order_by(desc(models.StockPriceDaily.date))
                 .limit(15)
                 .all()
             )
-            closes = [round(float(r[0]), 2) for r in reversed(rows) if r[0]]
-            it["sparkline"] = closes
+            spark = [round(float(r[0]), 2) for r in reversed(rows) if r[0]]
+        resolved_sparks[sid] = spark
+        if len(spark) >= 2:
+            cache_service.set_cache_entry(f"tw_spark:{sid}:{bucket}", spark, ttl, db=db)
+
+    for it in missing_items:
+        it["sparkline"] = list(resolved_sparks.get(it["id"], []))
 
 
 def _build_foreign_pool(pool_specs: List[Dict[str, str]], market: str, currency_sym: str) -> List[Dict[str, Any]]:
-    symbols = [p["symbol"] for p in pool_specs]
-    quotes = _cached(f"yf_pool:{market}", 60, lambda: _batch_download_quotes(symbols)) or {}
+    # Download full market symbol pool once so subsets (e.g. 'semi') share the same warm cache cleanly
+    full_specs = US_POOL if market == "US" else JP_POOL if market == "JP" else pool_specs
+    full_symbols = [p["symbol"] for p in full_specs]
+    for p in pool_specs:
+        if p["symbol"] not in full_symbols:
+            full_symbols.append(p["symbol"])
+
+    bucket, _, ttl = cache_service.get_market_cache_bucket(market, live_ttl=30, closed_ttl=86400)
+    quotes = cache_service.get_or_set_cache(
+        f"yf_pool:{market}:{bucket}",
+        ttl,
+        lambda: _batch_download_quotes(full_symbols),
+        db=None,
+        validator_fn=lambda q: bool(q and len(q) > 0),
+    ) or {}
+
     items: List[Dict[str, Any]] = []
     for p in pool_specs:
         q = quotes.get(p["symbol"])
@@ -430,4 +479,35 @@ def get_global_rankings(category: str = "tw_core", limit: int = 5, db: Optional[
 
         return {"category": category, "gainers": [], "losers": []}
 
-    return _cached(f"rankings:{category}:{limit}", 60, _compute)
+    category_markets = {
+        "tw_core": ["TW"],
+        "tw_all": ["TW"],
+        "us": ["US"],
+        "jp": ["JP"],
+        "semi": ["TW", "US", "JP"],
+    }
+    markets = category_markets.get(category, ["TW", "US", "JP"])
+    bucket, _, ttl = cache_service.get_multi_market_cache_bucket(markets, live_ttl=30, closed_ttl=86400)
+    res = cache_service.get_or_set_cache(
+        f"rankings:{category}:{limit}:{bucket}",
+        ttl,
+        _compute,
+        db=db,
+        validator_fn=lambda d: bool(d and (d.get("gainers") or d.get("losers"))),
+    )
+    return res or {"category": category, "gainers": [], "losers": []}
+
+
+def get_all_global_rankings(limit: int = 5, db: Optional[Session] = None) -> Dict[str, Any]:
+    """Preload and return all 5 multi-market ranking categories in a single payload."""
+    categories = {
+        "tw_core": get_global_rankings("tw_core", limit, db),
+        "tw_all": get_global_rankings("tw_all", limit, db),
+        "us": get_global_rankings("us", limit, db),
+        "jp": get_global_rankings("jp", limit, db),
+        "semi": get_global_rankings("semi", limit, db),
+    }
+    return {
+        "categories": categories,
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }

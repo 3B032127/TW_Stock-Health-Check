@@ -13,8 +13,9 @@ const root = ReactDOM.createRoot(rootElement);
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: true, // As requested in PRD
-      retry: 1, // As requested in PRD
+      gcTime: 12 * 60 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      retry: 1,
     },
   },
 });

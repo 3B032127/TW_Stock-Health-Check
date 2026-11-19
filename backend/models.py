@@ -195,3 +195,43 @@ class GSBacktestResult(Base):
     metric = Column(String)                    # e.g. "Sharpe", "CumulativeReturn", "MaxDrawdown", "WinRate", "Alpha"
     value = Column(Float)
 
+
+class StockPrediction(Base):
+    __tablename__ = "stock_predictions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    symbol = Column(String(16), nullable=False, index=True)
+    market = Column(String(8), nullable=False, default="TW", index=True)
+    predict_date = Column(String(16), nullable=False, index=True)
+    target_date = Column(String(16), nullable=False, index=True)
+    horizon = Column(Integer, nullable=False)
+    base_close = Column(Float, nullable=False)
+    pred_p10 = Column(Float, nullable=False)
+    pred_p50 = Column(Float, nullable=False)
+    pred_p90 = Column(Float, nullable=False)
+    actual_close = Column(Float, nullable=True)
+    model_weights = Column(String(64), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "market",
+            "predict_date",
+            "target_date",
+            name="uix_stock_predictions_sym_mkt_pdate_tdate",
+        ),
+    )
+
+
+class PredictionBacktestSummary(Base):
+    __tablename__ = "prediction_backtest_summary"
+
+    symbol = Column(String(16), primary_key=True)
+    market = Column(String(8), primary_key=True, default="TW")
+    updated_at = Column(String(32), nullable=False)
+    sample_count = Column(Integer, nullable=False)
+    directional_accuracy = Column(Float, nullable=False)
+    mape = Column(Float, nullable=False)
+    interval_coverage = Column(Float, nullable=False)
+
+

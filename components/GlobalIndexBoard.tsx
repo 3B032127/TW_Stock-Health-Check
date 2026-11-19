@@ -4,7 +4,12 @@ import {
 } from 'recharts';
 import { Icon } from '../App';
 import {
-  useGlobalIndexList, useGlobalIndexDetail, GlobalIndexSummary, MarketCode, MarketStatus,
+  useGlobalIndexList,
+  useGlobalIndexDetail,
+  usePrefetchGlobalIndexPeriods,
+  GlobalIndexSummary,
+  MarketCode,
+  MarketStatus,
 } from '../hooks/useGlobalIndices';
 
 const UP = '#ef4444';   // 台股習慣：紅漲
@@ -87,7 +92,7 @@ const GlobalIndexBoard: React.FC<{ onUpdated?: (ts: number) => void }> = ({ onUp
   const [selectedId, setSelectedId] = useState('taiex');
   const [period, setPeriod] = useState('1d');
 
-  const { indices, dataUpdatedAt: listUpdated } = useGlobalIndexList();
+  const { indices, detailsById, dataUpdatedAt: listUpdated } = useGlobalIndexList();
   const visible = useMemo(
     () => indices.filter((i) => filter === 'ALL' || i.market === filter),
     [indices, filter]
@@ -95,9 +100,12 @@ const GlobalIndexBoard: React.FC<{ onUpdated?: (ts: number) => void }> = ({ onUp
   const selected: GlobalIndexSummary | undefined =
     indices.find((i) => i.id === selectedId) ?? indices[0];
 
+  const selectedMarket: MarketCode = selected?.market ?? 'TW';
   const { detail, isLoading: detailLoading, dataUpdatedAt: detailUpdated } = useGlobalIndexDetail(
-    selectedId, period, selected?.status !== 'closed'
+    selectedId, period, selected?.status !== 'closed', selectedMarket
   );
+
+  usePrefetchGlobalIndexPeriods(selectedId, selectedMarket);
 
   useEffect(() => { onUpdated?.(Math.max(listUpdated || 0, detailUpdated || 0)); }, [listUpdated, detailUpdated, onUpdated]);
 
@@ -107,21 +115,23 @@ const GlobalIndexBoard: React.FC<{ onUpdated?: (ts: number) => void }> = ({ onUp
     if (first && !(selected && (f === 'ALL' || selected.market === f))) setSelectedId(first.id);
   };
 
-  const sameIdx = detail && detail.id === selectedId && detail.period === period;
-  const status: MarketStatus = (sameIdx ? detail!.status : selected?.status) ?? 'closed';
+  const is1d = period === '1d';
+  const matchedQueryDetail = detail && detail.id === selectedId && detail.period === period ? detail : null;
+  const activeDetail = matchedQueryDetail ?? (is1d ? detailsById[selectedId] ?? null : null);
+  const sameIdx = !!activeDetail;
+  const status: MarketStatus = (sameIdx ? activeDetail!.status : selected?.status) ?? 'closed';
   const price = selected?.price ?? 0;
   const change = selected?.change ?? 0;
   const pct = selected?.changePercent ?? 0;
   const isUp = change >= 0;
   const color = isUp ? UP : DOWN;
-  const cur = sameIdx ? detail!.current : null;
+  const cur = sameIdx ? activeDetail!.current : null;
 
-  const is1d = period === '1d';
-  const showPulse = sameIdx && is1d && status !== 'closed' && detail!.history.length > 0;
-  const lastPt = sameIdx && detail!.history.length ? detail!.history[detail!.history.length - 1] : null;
+  const showPulse = sameIdx && is1d && status !== 'closed' && activeDetail!.history.length > 0;
+  const lastPt = sameIdx && activeDetail!.history.length ? activeDetail!.history[activeDetail!.history.length - 1] : null;
 
-  const chartData = sameIdx ? detail!.history : [];
-  const ticks = sameIdx && is1d ? detail!.session.ticks : undefined;
+  const chartData = sameIdx ? activeDetail!.history : [];
+  const ticks = sameIdx && is1d ? activeDetail!.session.ticks : undefined;
 
   const tickFormatter = (v: any) => {
     if (is1d) return ticks?.find((t) => t.x === v)?.label ?? '';
@@ -179,8 +189,8 @@ const GlobalIndexBoard: React.FC<{ onUpdated?: (ts: number) => void }> = ({ onUp
                   </div>
                   <MiniSpark
                     data={
-                      i.id === selectedId && sameIdx && is1d && detail!.history.length > 0
-                        ? detail!.history.map((p) => p.close)
+                      i.id === selectedId && sameIdx && is1d && activeDetail!.history.length > 0
+                        ? activeDetail!.history.map((p) => p.close)
                         : i.sparkline
                     }
                     color={c}
@@ -262,7 +272,7 @@ const GlobalIndexBoard: React.FC<{ onUpdated?: (ts: number) => void }> = ({ onUp
           <div className="flex-1 p-6 relative flex flex-col">
             <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
               <p className="text-xs text-textMuted">
-                {sameIdx ? `${detail!.timezoneLabel}｜交易時段 ${detail!.sessionLabel}` : '\u00A0'}
+                {sameIdx ? `${activeDetail!.timezoneLabel}｜交易時段 ${activeDetail!.sessionLabel}` : '\u00A0'}
                 {status === 'lunch' && <span className="ml-2 text-amber-400 font-bold">午休中</span>}
               </p>
               <div className="flex gap-2">
@@ -295,7 +305,7 @@ const GlobalIndexBoard: React.FC<{ onUpdated?: (ts: number) => void }> = ({ onUp
                   </defs>
                   {is1d ? (
                     <XAxis
-                      dataKey="x" type="number" domain={[0, sameIdx ? detail!.session.total : 1]}
+                      dataKey="x" type="number" domain={[0, sameIdx ? activeDetail!.session.total : 1]}
                       ticks={ticks?.map((t) => t.x)} tickFormatter={tickFormatter}
                       stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 11 }} allowDataOverflow
                     />

@@ -16,6 +16,7 @@ import google.generativeai as genai
 import httpx
 from bs4 import BeautifulSoup
 import re
+from . import cache_service
 from .global_indices import _yf_lock
 
 
@@ -524,80 +525,92 @@ class MarketIndicatorsService:
 
     def _fetch_yahoo_taiex_data(self) -> Dict[str, float]:
         """
-        Fetch TAIEX volume and turnover from Yahoo Finance Taiwan
+        Fetch TAIEX volume and turnover from Yahoo Finance Taiwan (cached per TW session bucket).
         Returns dict with 'price', 'volume' (shares), and 'turnover' (amount)
         """
-        try:
-            url = "https://tw.stock.yahoo.com/s/tse.php"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-            
-            response = httpx.get(url, headers=headers, timeout=10.0)
-            if response.status_code != 200:
-                print(f"Yahoo scraping failed with status {response.status_code}")
+        tw_bucket, _, ttl = cache_service.get_market_cache_bucket("TW", live_ttl=30, closed_ttl=86400)
+
+        def _scrape() -> Dict[str, float]:
+            try:
+                url = "https://tw.stock.yahoo.com/s/tse.php"
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                }
+
+                response = httpx.get(url, headers=headers, timeout=3.0)
+                if response.status_code != 200:
+                    print(f"Yahoo scraping failed with status {response.status_code}")
+                    return {"volume": 0, "turnover": 0}
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+
+                # Find the script tag containing "root.App.main"
+                script_tags = soup.find_all('script')
+                for script in script_tags:
+                    if script.string and "root.App.main" in script.string:
+                        # Improved extraction logic
+                        start_marker = "root.App.main ="
+                        start_index = script.string.find(start_marker)
+                        if start_index != -1:
+                            # Move past the marker
+                            json_start = script.string.find("{", start_index)
+                            if json_start != -1:
+                                # Use rfind to find the last closing brace and semicolon
+                                json_end = script.string.rfind("};")
+                                if json_end != -1:
+                                    json_str = script.string[json_start:json_end+1]
+                                    # Sanitize common JS-only values
+                                    json_str = json_str.replace("undefined", "null")
+
+                                    try:
+                                        data = json.loads(json_str)
+                                        dispatcher = data.get('context', {}).get('dispatcher', {}).get('stores', {})
+
+                                        # Try MarketDataStore first (modern path)
+                                        market_data = dispatcher.get('MarketDataStore', {}).get('marketDataList', {}).get('^TWII', {})
+
+                                        # Fallback to QuoteFundamental if MarketDataStore is missing
+                                        if not market_data:
+                                            market_data = dispatcher.get('QuoteFundamental', {}).get('quote', {}).get('data', {})
+
+                                        if not market_data:
+                                            continue
+
+                                        def get_val(obj, key, default=0):
+                                            val = obj.get(key, default)
+                                            if isinstance(val, dict):
+                                                return val.get('raw', default)
+                                            return val
+
+                                        result = {
+                                            "price": float(get_val(market_data, 'price', 0)),
+                                            "volume": float(get_val(market_data, 'volume', 0)),
+                                            "turnover": float(get_val(market_data, 'turnoverM', 0)) * 1000000,
+                                            "high": float(get_val(market_data, 'regularMarketDayHigh', market_data.get('high', 0))),
+                                            "low": float(get_val(market_data, 'regularMarketDayLow', market_data.get('low', 0))),
+                                            "open": float(get_val(market_data, 'regularMarketOpen', market_data.get('open', 0))),
+                                            "change": float(get_val(market_data, 'change', 0)),
+                                            "changePercent": float(get_val(market_data, 'changePercent', 0).replace('%', '') if isinstance(get_val(market_data, 'changePercent', '0'), str) else get_val(market_data, 'changePercent', 0))
+                                        }
+                                        return result
+
+                                    except (json.JSONDecodeError, ValueError) as e:
+                                        print(f"Error parsing Yahoo JSON: {e}")
+
                 return {"volume": 0, "turnover": 0}
-                
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Find the script tag containing "root.App.main"
-            script_tags = soup.find_all('script')
-            for script in script_tags:
-                if script.string and "root.App.main" in script.string:
-                    # Improved extraction logic
-                    start_marker = "root.App.main ="
-                    start_index = script.string.find(start_marker)
-                    if start_index != -1:
-                        # Move past the marker
-                        json_start = script.string.find("{", start_index)
-                        if json_start != -1:
-                            # Use rfind to find the last closing brace and semicolon
-                            json_end = script.string.rfind("};")
-                            if json_end != -1:
-                                json_str = script.string[json_start:json_end+1]
-                                # Sanitize common JS-only values
-                                json_str = json_str.replace("undefined", "null")
-                                
-                                try:
-                                    data = json.loads(json_str)
-                                    dispatcher = data.get('context', {}).get('dispatcher', {}).get('stores', {})
-                                    
-                                    # Try MarketDataStore first (modern path)
-                                    market_data = dispatcher.get('MarketDataStore', {}).get('marketDataList', {}).get('^TWII', {})
-                                    
-                                    # Fallback to QuoteFundamental if MarketDataStore is missing
-                                    if not market_data:
-                                        market_data = dispatcher.get('QuoteFundamental', {}).get('quote', {}).get('data', {})
-                                    
-                                    if not market_data:
-                                        continue
 
-                                    def get_val(obj, key, default=0):
-                                        val = obj.get(key, default)
-                                        if isinstance(val, dict):
-                                            return val.get('raw', default)
-                                        return val
+            except Exception as e:
+                print(f"Error scraping Yahoo Finance: {e}")
+                return {"volume": 0, "turnover": 0}
 
-                                    result = {
-                                        "price": float(get_val(market_data, 'price', 0)),
-                                        "volume": float(get_val(market_data, 'volume', 0)),
-                                        "turnover": float(get_val(market_data, 'turnoverM', 0)) * 1000000,
-                                        "high": float(get_val(market_data, 'regularMarketDayHigh', market_data.get('high', 0))),
-                                        "low": float(get_val(market_data, 'regularMarketDayLow', market_data.get('low', 0))),
-                                        "open": float(get_val(market_data, 'regularMarketOpen', market_data.get('open', 0))),
-                                        "change": float(get_val(market_data, 'change', 0)),
-                                        "changePercent": float(get_val(market_data, 'changePercent', 0).replace('%', '') if isinstance(get_val(market_data, 'changePercent', '0'), str) else get_val(market_data, 'changePercent', 0))
-                                    }
-                                    return result
-                                    
-                                except (json.JSONDecodeError, ValueError) as e:
-                                    print(f"Error parsing Yahoo JSON: {e}")
-            
-            return {"volume": 0, "turnover": 0}
-            
-        except Exception as e:
-            print(f"Error scraping Yahoo Finance: {e}")
-            return {"volume": 0, "turnover": 0}
+        res = cache_service.get_or_set_cache(
+            f"yahoo_taiex_scrape:{tw_bucket}",
+            ttl,
+            _scrape,
+            db=None,
+            validator_fn=lambda d: bool(d and (d.get("price", 0) > 0 or d.get("turnover", 0) > 0 or d.get("volume", 0) > 0)),
+        )
+        return res or {"volume": 0, "turnover": 0}
 
     def _create_manual_taiex_response(self, yahoo_data: Dict[str, Any], period: str) -> Dict[str, Any]:
         """Create a full response using only scraped Yahoo data when yfinance fails"""
@@ -683,73 +696,82 @@ class MarketIndicatorsService:
             }
             
         ticker_symbol = ticker_map[indicator_id]
-        
-        try:
-            # Determine interval based on period
-            interval = "1d"
-            scrape_period = period
-            
-            if period == "1d":
-                interval = "5m"
-            elif period == "1w":
-                interval = "30m"
-                scrape_period = "5d"
-            elif period == "1m":
+        bucket, _, ttl = cache_service.get_multi_market_cache_bucket(["TW", "US", "JP"], live_ttl=60, closed_ttl=86400)
+
+        def _compute_history() -> Dict[str, Any]:
+            try:
+                # Determine interval based on period
                 interval = "1d"
-                scrape_period = "1mo"
-            elif period == "6m":
-                interval = "1d"
-                scrape_period = "6mo"
-            elif period == "1y":
-                interval = "1d"
-                scrape_period = "1y"
-            elif period == "5y":
-                interval = "1wk"
-                scrape_period = "5y"
-                
-            with _yf_lock:
-                hist = yf.Ticker(ticker_symbol).history(period=scrape_period, interval=interval)
-                if hist is not None and not hist.empty:
-                    hist = hist.dropna(subset=["Close"]).copy()
-                else:
-                    hist = None
-            
-            if hist is None or hist.empty:
+                scrape_period = period
+
+                if period == "1d":
+                    interval = "5m"
+                elif period == "1w":
+                    interval = "30m"
+                    scrape_period = "5d"
+                elif period == "1m":
+                    interval = "1d"
+                    scrape_period = "1mo"
+                elif period == "6m":
+                    interval = "1d"
+                    scrape_period = "6mo"
+                elif period == "1y":
+                    interval = "1d"
+                    scrape_period = "1y"
+                elif period == "5y":
+                    interval = "1wk"
+                    scrape_period = "5y"
+
+                with _yf_lock:
+                    hist = yf.Ticker(ticker_symbol).history(period=scrape_period, interval=interval)
+                    if hist is not None and not hist.empty:
+                        hist = hist.dropna(subset=["Close"]).copy()
+                    else:
+                        hist = None
+
+                if hist is None or hist.empty:
+                    return {
+                        "indicator_id": indicator_id,
+                        "period": period,
+                        "history": []
+                    }
+
+                history_data = []
+                for idx, row in hist.iterrows():
+                    if period in ["1d", "1w"]:
+                        date_str = idx.strftime("%Y-%m-%d %H:%M")
+                    else:
+                        date_str = idx.strftime("%Y-%m-%d")
+
+                    val = float(row['Close'])
+                    history_data.append({
+                        "date": date_str,
+                        "value": val
+                    })
+
                 return {
                     "indicator_id": indicator_id,
                     "period": period,
+                    "history": history_data
+                }
+
+            except Exception as e:
+                print(f"Error fetching history for {indicator_id}: {e}")
+                return {
+                    "indicator_id": indicator_id,
+                    "period": period,
+                    "error": str(e),
                     "history": []
                 }
-                
-            history_data = []
-            
-            # Process dataframe
-            for idx, row in hist.iterrows():
-                if period in ["1d", "1w"]:
-                    date_str = idx.strftime("%Y-%m-%d %H:%M")
-                else:
-                    date_str = idx.strftime("%Y-%m-%d")
-                    
-                val = float(row['Close'])
-                history_data.append({
-                    "date": date_str,
-                    "value": val
-                })
-                
-            return {
-                "indicator_id": indicator_id,
-                "period": period,
-                "history": history_data
-            }
-            
-        except Exception as e:
-            print(f"Error fetching history for {indicator_id}: {e}")
-            return {
-                "indicator_id": indicator_id,
-                "period": period,
-                "error": str(e),
-                "history": []
-            }
+
+        res = cache_service.get_or_set_cache(
+            f"ind_hist:{indicator_id}:{period}:{bucket}",
+            ttl,
+            _compute_history,
+            db=None,
+            validator_fn=lambda d: bool(d and d.get("history")),
+        )
+        return res or {"indicator_id": indicator_id, "period": period, "history": []}
 
     
     def get_all_indicators(self) -> Dict[str, Any]:

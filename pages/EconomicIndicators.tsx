@@ -3,21 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveCo
 import { Icon } from '../App';
 import { INDICATOR_DETAILS, INDICATOR_CATEGORIES, generateHistoricalData } from '../indicatorDetails';
 import { loadMonitorLightData, getMonitorDataForPeriod, getLatestMonitorData, getSignalColor, getSignalDescription, type MonitorLightData } from '../monitorLightData';
-import { useIndicatorHistory, IndicatorHistoryPoint } from '../hooks/useMarketData';
-import { API_BASE_URL } from '../services/api';
-
-interface Indicator {
-  id?: string;
-  name: string;
-  value: string;
-  change: string;
-  isUp: boolean;
-  description?: string;
-  note?: string;
-  text?: string;
-  isPositiveForMarket?: boolean;
-  changePercent?: string;
-}
+import { useIndicators, useIndicatorHistory, IndicatorHistoryPoint } from '../hooks/useMarketData';
 
 interface SidebarItemProps {
   icon: string;
@@ -57,11 +43,9 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
   };
 
   const [selectedIndicator, setSelectedIndicator] = useState<string>(initialIndicatorId || 'usdtwd');
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
   // Initialize with shortest period for the default indicator
   const [chartPeriod, setChartPeriod] = useState<string>(() => getShortestPeriod(initialIndicatorId || 'usdtwd'));
-  const [loading, setLoading] = useState(true);
-  const [monitorLightData, setMonitorLightData] = useState<MonitorLightData[]>([]);
+  const [monitorLightData] = useState<MonitorLightData[]>([]);
 
   // Update selected indicator when prop changes
   useEffect(() => {
@@ -71,29 +55,7 @@ const EconomicIndicators: React.FC<EconomicIndicatorsProps> = ({ initialIndicato
     }
   }, [initialIndicatorId]);
 
-  // Fetch indicators from API and merge with monitor light data
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        // Fetch API indicators
-        const response = await fetch(`${API_BASE_URL}/market/indicators`);
-        const result = await response.json();
-
-        let apiIndicators: Indicator[] = [];
-        if (result.status === 'success' && result.data && result.data.indicators) {
-          apiIndicators = result.data.indicators;
-        }
-        setIndicators(apiIndicators);
-      } catch (error) {
-        console.error('Error fetching indicators:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
+  const { indicators, isLoading: loading } = useIndicators();
 
   // Get current indicator data
   const currentIndicatorData = indicators.find(ind => ind.id === selectedIndicator);

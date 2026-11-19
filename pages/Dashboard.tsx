@@ -5,11 +5,12 @@ import {
   useIndicators,
   useIndicatorHistory,
   useADRMonitor,
-  useGlobalRankings,
+  useAllGlobalRankings,
   ADRQuote,
   RankingCategory,
   RankingStock,
 } from '../hooks/useMarketData';
+import { useGlobalIndexList } from '../hooks/useGlobalIndices';
 import GlobalIndexBoard from '../components/GlobalIndexBoard';
 import SyncIndicator from '../components/SyncIndicator';
 
@@ -324,6 +325,13 @@ const Dashboard = ({
   const activeRankingCategory: RankingCategory = rankingGroup === 'tw' ? twScope : rankingGroup;
 
   const {
+    indices,
+    isLoading: indicesLoading,
+    isFetching: indicesFetching,
+    dataUpdatedAt: indicesUpdatedAt,
+  } = useGlobalIndexList();
+
+  const {
     indicators,
     isLoading: indicatorsLoading,
     isFetching: indicatorsFetching,
@@ -332,29 +340,44 @@ const Dashboard = ({
 
   const {
     adrData,
+    isLoading: adrLoading,
     isFetching: adrFetching,
     dataUpdatedAt: adrUpdatedAt,
   } = useADRMonitor();
 
   const {
-    gainers: topGainers,
-    losers: topLosers,
+    categories: rankingsCategories,
     isLoading: rankingsLoading,
     isFetching: rankingsFetching,
     dataUpdatedAt: rankingsUpdatedAt,
-  } = useGlobalRankings(activeRankingCategory, 5);
+  } = useAllGlobalRankings(5);
 
-  const isLoading = indicatorsLoading;
-  const isFetching = indicatorsFetching || adrFetching || rankingsFetching;
+  const activeRankings = rankingsCategories[activeRankingCategory];
+  const topGainers = activeRankings?.gainers ?? [];
+  const topLosers = activeRankings?.losers ?? [];
+
+  const hasIndices = indices.length > 0;
+  const hasIndicators = indicators.length > 0;
+  const hasADR = adrData.items.length > 0;
+  const hasRankings = Object.keys(rankingsCategories).length > 0;
+
+  const isLoading = indicesLoading || indicatorsLoading || adrLoading || rankingsLoading;
+  const isFetching = indicesFetching || indicatorsFetching || adrFetching || rankingsFetching;
 
   const lastUpdated = Math.max(
     boardUpdated || 0,
+    indicesUpdatedAt || 0,
     indicatorsUpdatedAt || 0,
     adrUpdatedAt || 0,
     rankingsUpdatedAt || 0
   );
 
-  const isInitialLoading = !indicators.length && indicatorsLoading;
+  const isInitialLoading =
+    (!hasIndices && indicesLoading) ||
+    (!hasIndicators && indicatorsLoading) ||
+    (!hasADR && adrLoading) ||
+    (!hasRankings && rankingsLoading);
+
   if (isInitialLoading) {
     return <StockLoading />;
   }

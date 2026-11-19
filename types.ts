@@ -270,7 +270,8 @@ export enum StockTab {
   HEALTH_CHECK = 'HEALTH_CHECK',
   FINANCIALS = 'FINANCIALS',
   GS_FACTOR = 'GS_FACTOR',
-  GS_BACKTEST = 'GS_BACKTEST'
+  GS_BACKTEST = 'GS_BACKTEST',
+  PREDICTION = 'PREDICTION'
 }
 
 export enum FinancialSubTab {
@@ -441,4 +442,48 @@ export interface GSBacktestData {
   current_status?: GSCurrentStatus;
   equity_curve: GSEquityPoint[];
   trade_log: GSTradeRecord[];
+}
+
+// --- Dual-Model Ensemble Prediction & Backtest Types ---
+export interface StockPredictionKPIs {
+  sample_count: number;
+  directional_accuracy: number;
+  mape: number;
+  interval_coverage: number;
+  model_weights: {
+    kronos: number;
+    timesfm: number;
+  };
+}
+
+export interface HistoricalBacktestPoint {
+  date: string;
+  predict_date?: string;
+  base_close?: number;
+  actual_close: number;
+  predicted_close_5d_ago: number;
+  pred_p10_5d_ago: number;
+  pred_p90_5d_ago: number;
+}
+
+export interface FutureForecastPoint {
+  horizon: number;
+  target_date: string;
+  pred_p10: number;
+  pred_p50: number;
+  pred_p90: number;
+  expected_return_pct: number;
+}
+
+export interface StockPredictionData {
+  symbol: string;
+  name: string;
+  currency: string;
+  last_updated: string;
+  base_close?: number;
+  kpis: StockPredictionKPIs;
+  kpis_t1?: StockPredictionKPIs;
+  historical_backtest_t1?: HistoricalBacktestPoint[];
+  historical_backtest: HistoricalBacktestPoint[];
+  future_forecast: FutureForecastPoint[];
 }

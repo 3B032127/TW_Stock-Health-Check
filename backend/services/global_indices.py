@@ -20,6 +20,8 @@ from zoneinfo import ZoneInfo
 import httpx
 import yfinance as yf
 
+from . import cache_service
+
 MARKET_CURRENCY: Dict[str, Dict[str, str]] = {
     "TW": {"currency": "TWD", "mini": "台幣 TWD", "badge": "台幣 (TWD)"},
     "US": {"currency": "USD", "mini": "美元 USD", "badge": "美元 (USD)"},
@@ -74,23 +76,7 @@ INDEX_CONFIG: Dict[str, Dict[str, Any]] = {
 }
 INDEX_ORDER = ["taiex", "sox", "nasdaq", "sp500", "dow", "nikkei", "topix"]
 
-_cache: Dict[str, Tuple[float, Any]] = {}
-_cache_lock = threading.Lock()
 _yf_lock = threading.Lock()
-
-
-def _cached(key: str, ttl: float, fn):
-    now = time.time()
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit and now - hit[0] < ttl:
-            return hit[1]
-    value = fn()
-    # never cache failures/empties so the next request retries
-    if value:
-        with _cache_lock:
-            _cache[key] = (now, value)
-    return value
 
 
 def _history(cfg: Dict[str, Any], **kwargs):
@@ -151,7 +137,8 @@ def _fetch_topix_official() -> Optional[Dict[str, float]]:
 
         return None
 
-    return _cached("topix_official", 300, _fetch)
+    jp_bucket, _, ttl = cache_service.get_market_cache_bucket("JP", live_ttl=300, closed_ttl=86400)
+    return cache_service.get_or_set_cache(f"topix_official:{jp_bucket}", ttl, _fetch)
 
 
 def _local_now(cfg) -> datetime:
@@ -206,11 +193,8 @@ def _ticks(cfg) -> List[Dict[str, Any]]:
     return ticks
 
 
-def _summary(index_id: str) -> Optional[Dict[str, Any]]:
+def _summary_from_detail(index_id: str, detail: Dict[str, Any]) -> Dict[str, Any]:
     cfg = INDEX_CONFIG[index_id]
-    detail = get_index(index_id, "1d")
-    if not detail or not detail.get("history"):
-        return None
     cur = detail["current"]
     cur_meta = MARKET_CURRENCY[cfg["market"]]
     return {
@@ -232,27 +216,40 @@ def _summary(index_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def list_indices() -> List[Dict[str, Any]]:
-    def build():
-        with ThreadPoolExecutor(max_workers=7) as ex:
-            results = list(ex.map(_summary, INDEX_ORDER))
-        out = [r for r in results if r]
-        return out if len(out) else None
+def list_indices_bundle() -> Dict[str, Any]:
+    """Fetch all 7 core indices along with their full 1d detail payloads in parallel."""
+    with ThreadPoolExecutor(max_workers=7) as ex:
+        results = list(ex.map(lambda idx_id: (idx_id, get_index(idx_id, "1d")), INDEX_ORDER))
 
-    items = _cached("list", 20, build) or []
-    # status depends on wall clock -> recompute on every call
-    for it in items:
-        cfg = INDEX_CONFIG[it["id"]]
-        it["status"] = market_status(cfg, it["date"])
-    return items
+    indices: List[Dict[str, Any]] = []
+    details: Dict[str, Dict[str, Any]] = {}
+    for idx_id, detail in results:
+        if detail and detail.get("history"):
+            indices.append(_summary_from_detail(idx_id, detail))
+            details[idx_id] = detail
+    return {"indices": indices, "details": details}
+
+
+def list_indices() -> List[Dict[str, Any]]:
+    return list_indices_bundle()["indices"]
 
 
 def get_index(index_id: str, period: str = "1d") -> Optional[Dict[str, Any]]:
     cfg = INDEX_CONFIG.get(index_id)
     if not cfg:
         return None
-    ttl = 10 if period == "1d" else 60
-    data = _cached(f"idx:{index_id}:{period}", ttl, lambda: _build_index(index_id, cfg, period))
+    if period == "1d":
+        bucket, _, ttl = cache_service.get_market_cache_bucket(cfg["market"], live_ttl=15, closed_ttl=86400)
+    else:
+        bucket, _, ttl = cache_service.get_market_cache_bucket(cfg["market"], live_ttl=300, closed_ttl=86400)
+
+    data = cache_service.get_or_set_cache(
+        f"gidx:{index_id}:{period}:{bucket}",
+        ttl,
+        lambda: _build_index(index_id, cfg, period),
+        db=None,
+        validator_fn=lambda d: bool(d and d.get("history")),
+    )
     if not data:
         return None
     data = dict(data)

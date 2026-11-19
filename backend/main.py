@@ -993,41 +993,44 @@ async def read_economics(
 @app.get("/api/v1/market/indicators")
 def read_market_indicators(db: Session = Depends(get_db)):
     """Get real-time market indicators that influence Taiwan stock market"""
-    # 嘗試讀取快取
-    cached = cache_service.get_cached_response(db, "market", "indicators")
-    if cached:
-        cached_inds = cached.get("data", {}).get("indicators", [])
-        cached_ids = {i.get("id") for i in cached_inds}
-        if {"vix", "jp_rate", "us_nfp"}.issubset(cached_ids) and all(i.get("sparkline") for i in cached_inds if i.get("id") != "taiex"):
-            return cached
-
     from .services.indicators import get_indicators_service
     import os
-    
-    # Get Gemini API key from environment
-    gemini_key = os.getenv("GEMINI_API_KEY", "AIzaSyBBlB4xBOS4LcCwVQr6VbW6Hdofa3JruWA")
-    
-    service = get_indicators_service(gemini_key)
-    data = service.get_all_indicators()
-    
-    res = {
-        "status": "success",
-        "source": "yfinance+gemini",
-        "data": data
-    }
-    # 僅在核心指標有效時存儲快取
-    inds = data.get("indicators", []) if isinstance(data, dict) else []
-    if any(i.get("id") == "taiex" and i.get("value") not in ("N/A", "", None) for i in inds):
-        cache_service.set_cached_response(db, "market", "indicators", res)
-    return res
 
+    bucket, _, ttl = cache_service.get_multi_market_cache_bucket(["TW", "US", "JP"], live_ttl=60, closed_ttl=86400)
+
+    def _compute():
+        gemini_key = os.getenv("GEMINI_API_KEY", "AIzaSyBBlB4xBOS4LcCwVQr6VbW6Hdofa3JruWA")
+        service = get_indicators_service(gemini_key)
+        data = service.get_all_indicators()
+        return {
+            "status": "success",
+            "source": "yfinance+gemini",
+            "data": data
+        }
+
+    def _valid(res: dict) -> bool:
+        inds = res.get("data", {}).get("indicators", []) if isinstance(res, dict) else []
+        ids = {i.get("id") for i in inds}
+        return (
+            {"vix", "jp_rate", "us_nfp"}.issubset(ids)
+            and any(i.get("id") in ("taiex", "usdtwd") and i.get("value") not in ("N/A", "", None) for i in inds)
+        )
+
+    res = cache_service.get_or_set_cache(
+        f"market:indicators:{bucket}",
+        ttl,
+        _compute,
+        db=db,
+        validator_fn=_valid,
+    )
+    return res or {"status": "success", "source": "yfinance+gemini", "data": {"updated_at": "", "indicators": []}}
 
 
 @app.get("/api/v1/market/global-indices")
 def read_global_indices():
-    """Summary (price, change, sparkline, market status) of TW/US/JP core indices"""
-    from .services.global_indices import list_indices
-    return {"status": "success", "source": "yfinance", "data": {"indices": list_indices()}}
+    """Bundle of TW/US/JP core indices (summary list + preloaded 1D chart details)"""
+    from .services.global_indices import list_indices_bundle
+    return {"status": "success", "source": "yfinance", "data": list_indices_bundle()}
 
 
 @app.get("/api/v1/market/global-indices/{index_id}")
@@ -1052,13 +1055,16 @@ def read_adr_monitor(db: Session = Depends(get_db)):
 
 @app.get("/api/v1/market/global-rankings")
 def read_global_rankings(
-    category: str = Query(default="tw_core", pattern="^(tw_core|tw_all|us|jp|semi)$"),
+    category: str = Query(default="all", pattern="^(all|tw_core|tw_all|us|jp|semi)$"),
     limit: int = Query(default=5, ge=1, le=20),
     db: Session = Depends(get_db),
 ):
-    """Multi-market Top Gainers & Losers rankings (TW Core/All, US Tech, JP Nikkei 225, Global Semi)"""
-    from .services.global_rankings import get_global_rankings
-    data = get_global_rankings(category=category, limit=limit, db=db)
+    """Multi-market Top Gainers & Losers rankings (or all 5 categories preloaded)"""
+    from .services.global_rankings import get_global_rankings, get_all_global_rankings
+    if category == "all":
+        data = get_all_global_rankings(limit=limit, db=db)
+    else:
+        data = get_global_rankings(category=category, limit=limit, db=db)
     return {"status": "success", "source": "yfinance+sqlite", "data": data}
 
 
@@ -1380,8 +1386,51 @@ async def trigger_single_market_cap_sync(stock_id: str, db: Session = Depends(ge
     return res
 
 
+@app.get("/api/v1/stocks/{symbol}/prediction")
+@app.get("/api/v1/stock/{symbol}/prediction")
+def read_stock_prediction(symbol: str, db: Session = Depends(get_db)):
+    """零延遲讀取個股雙模型融合預測與近30日滾動回測結果 (Kronos + TimesFM 2.5)"""
+    from .services import prediction_service
+
+    data = prediction_service.get_stock_prediction(db, symbol)
+    if not data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"尚無股票 {symbol} 足夠的歷史 K 線資料以產生雙模型預測",
+        )
+    return {"status": "success", **data}
+
+
 # Mount Goldman Sachs gs-quant routes
 app.include_router(gs_quant_routes.router, prefix="/api/v1/gs_quant")
 app.include_router(gs_quant_routes.router, prefix="/api/gs_quant")
 app.include_router(gs_quant_routes.router, prefix="/gs_quant")
+
+
+@app.on_event("startup")
+def start_dashboard_cache_warmer():
+    """背景預熱首頁四大區塊快取（若 SQLite 尚未有當日快取則非同步預先建置）"""
+    import threading
+
+    def _warm():
+        from .services.global_indices import list_indices_bundle
+        from .services.global_rankings import get_adr_monitor, get_all_global_rankings
+
+        db = database.SessionLocal()
+        try:
+            for name, task in [
+                ("indicators", lambda: read_market_indicators(db)),
+                ("global_indices", lambda: list_indices_bundle()),
+                ("adr_monitor", lambda: get_adr_monitor(db)),
+                ("global_rankings", lambda: get_all_global_rankings(limit=5, db=db)),
+            ]:
+                try:
+                    task()
+                except Exception as exc:
+                    print(f"Dashboard cache warmer ({name}) warning: {exc}")
+        finally:
+            db.close()
+
+    threading.Thread(target=_warm, daemon=True, name="dashboard-cache-warmer").start()
+
 
