@@ -1,5 +1,7 @@
-# 台股每日盤後排程（本機時區需為 Asia/Taipei；週一至週五）
-# 14:35 先更新日 K 線並驗證最新交易日覆蓋率；未達標 exit 2
+# 台股每日盤後與週度排程（本機時區需為 Asia/Taipei）
+# 週一至週五 14:35 先更新日 K 線並驗證最新交易日覆蓋率；未達標 exit 2
 35 14 * * 1-5 cd /Users/xin/.gemini/antigravity/scratch/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh update >> /tmp/tw_update.log 2>&1
-# 14:40 確認資料已就緒後才執行雙模型預測 (--mode daily)
+# 週一至週五 14:40 確認資料已就緒後更新估值/多模態特徵並執行三引擎預測 (--mode daily)
 40 14 * * 1-5 cd /Users/xin/.gemini/antigravity/scratch/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh predict >> /tmp/tw_predict.log 2>&1
+# 每週六 10:00 使用過去 1 年全市場滾動回測樣本自動更新 LightGBM 殘差修正權重
+0 10 * * 6 cd /Users/xin/.gemini/antigravity/scratch/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh retrain >> /tmp/tw_retrain.log 2>&1

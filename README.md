@@ -37,16 +37,20 @@
 - **因子分析 (GS Factor)**：計算 Momentum (動量)、Value (價值)、Quality (品質)、Low Volatility (低波動)、Market Beta (市場風險) 與 Smart Money (法人籌碼) 六大風格因子曝險與雷達圖。
 - **策略回測 (GS Backtest)**：以 `gs_quant.timeseries` 引擎執行多因子、均線交叉、RSI 均值回歸與 MACD 動能策略回測，產出總報酬率、年化報酬率、夏普值 (Sharpe Ratio)、最大回撤 (Max Drawdown) 與資金淨值曲線圖。
 
-### 🤖 雙模型融合股價預測與歷史回測 (Kronos × TimesFM 2.5 Ensemble)
-- **核心雙模型融合架構**：
-  - **主力金融基礎模型**：`NeoQuasar/Kronos-base` (512日 OHLCV 蒙地卡羅採樣 20 條路徑)。
-  - **輔助宏觀時序模型**：`google/timesfm-2.5-200m-pytorch` (512日收盤價分位數頭)。
-- **動態反比誤差權重 (Dynamic Inverse-MAPE)**：
-  - 系統每日追蹤個股過去 30 次真實回測中兩大模型 MAPE 表現，動態調整權重比例（附 30%~70% 邊界保護）。
-- **全視角驗證與預測圖表**：
-  - 支援 **「明日預測 (T-1)」** 與 **「5日波段預測 (T-5)」** 自由切換。
-  - 嚴格遵守 XTAI 台灣證交所交易日曆與 ±10% 法定漲跌停限制截斷。
-  - 直觀呈現明日/5日多空紅綠訊號卡、80% 信賴區間扇形機率錐、動態多空變色基準線與今日收盤基準標籤。
+### 🤖 五模式自選多引擎股價預測與歷史回測 (Kronos × TimesFM 2.5 ＋ LightGBM V3.4)
+- **五模式 0 延遲即時切換**：
+  1. **`三引擎全融合` (`ensemble_all`)**：`Kronos` ＋ `TimesFM 2.5` 動態反比誤差融合 ＋ `LightGBM` 財報籌碼殘差修正。
+  2. **`雙時序技術面` (`ensemble_tech`)**：純技術複合 (`Kronos` ＋ `TimesFM 2.5`)，排除財報干擾。
+  3. **`Kronos (K線型態)` (`single_kronos`)**：`NeoQuasar/Kronos-base` 512 日 OHLCV 蒙地卡羅採樣 20 條路徑。
+  4. **`TimesFM 2.5 (趨勢協變量)` (`single_timesfm`)**：`google/timesfm-2.5-200m-pytorch` 含大盤 5D 報酬與外資流向協變量。
+  5. **`LightGBM (財報籌碼)` (`single_lgbm`)**：純基本面營收成長、財報分數、法人/融資籌碼與 gs-quant 因子獨立推論軌跡。
+- **偏多偏差校準與雙重風控閥**：
+  - **橫截面去中心化 (Cross-Sectional Demeaning)**：訓練與每日推論皆強制減去當日全市場平均修正值（全市場平均殘差嚴格歸零），並箝制於 **±2.5%**。
+  - **籌碼與趨勢風控閥**：當「近 5 日三大法人合計賣超」且「收盤價低於 10 日均線 (`Close < MA10`)」時，自動鎖死正向基本面加分上限為 `0.0%`。
+- **三引擎共識度徽章與動態特性提示**：自動比對三大獨立引擎多空方向，顯示 **`🔥 三引擎多空共振一致`** 或 **`⚡ 技術偏空 vs. 基本面籌碼偏多`**，並依模式即時切換優勢／盲點提示與 AI 因子歸因條。
+- **自適應估值河流與智能縮放分區 (`calc_stock_valuation.py`)**：
+  - 金融與景氣循環股（航運/鋼鐵/面板/塑化/水泥/造紙）及虧損股採用 **PB Band**；一般獲利股採用 **PE Band**；連續 5 年配息且殖利率 $\ge 4\%$ 股自動進行 50%/50% **股利殖利率混合校準**。
+  - 走勢圖同時繪製 **昂貴價／合理價／便宜價** 三條水平參考線、Y 軸右側膠囊標籤與三段式對比色帶，並具備 **智能 Y 軸縮放保護**（昂貴價高於近 35 日高點逾 35% 時自動保護 K 線視野並於右上角附註門檻價）。
 
 ### 🌐 全球跨國指數看盤艙與 ADR 監控 (Global Market Dashboard)
 - **台美日 7 大核心指數**：加權指數、費城半導體、那斯達克、標普 500、道瓊、日經 225、東證 TOPIX。
@@ -109,41 +113,49 @@
 
 ---
 
-## 📈 每日盤後自動化更新與雙模型推論管線 (Daily Prediction Pipeline)
+## 📈 每日盤後自動化更新與三引擎多模態推論管線 (Daily Prediction Pipeline)
 
 本系統支援「離線批次算力 ＋ 線上零延遲讀取」，每日收盤後（14:30 以後）可一鍵執行全自動更新管線：
 
 ### 🌟 管線執行流程
 1. **日 K 線增量抓取** (`scripts/update_tw_daily_prices.py`)：使用 yfinance 批次並行拉取全市場上市櫃個股當日最新收盤行情，寫入 SQLite。
-2. **交易日檢查與防禦**：自動判定今日是否為交易日、資料是否已如期入庫，若未滿足條件則安全終止，防止在未收盤時誤跑推論。
-3. **實際價格回填 (Backfill)**：將今日真實收盤價回填到過去所有已到期的預測紀錄中，更新真實誤差。
-4. **回測指標重算 (Recompute Backtest)**：滾動重算過去 30 次歷史預測之方向勝率 (Directional Accuracy)、MAPE 與信賴區間命中率。
-5. **雙模型推論 (Kronos × TimesFM Ensemble)**：啟用 Apple Silicon MPS 加速，推論未來 5 個交易日之目標價格與區間。
+2. **自適應估值河流計算** (`scripts/calc_stock_valuation.py`)：依產業與獲利狀態自動路由 PE Band / PB Band / 50%-50% 高股息混合校準，寫入 `stock_valuations`。
+3. **多模態特徵寬表組裝** (`scripts/build_multimodal_features.py`)：按法定財報公告日嚴格對齊，抽取出 13 維高頻籌碼、基本面營收/健檢與波動率特徵。
+4. **實際價格回填與指標重算**：將今日真實收盤價回填至到期紀錄，並滾動重算近 30 日勝率、MAPE 與 80% 信賴區間命中率。
+5. **五模式推論與週度再訓練** (`scripts/run_tw_predictions.py`)：同步計算 `ensemble_all`、`ensemble_tech`、`single_kronos`、`single_timesfm`、`single_lgbm` 五種預測軌跡與滾動 30 日 KPI，套用 LightGBM 橫截面去中心化與「法人 5 日賣超兼破 MA10」風控閥 (±2.5% 箝制)、ATR14 動態區間縮放與 ±10% 漲跌停截斷；每週六自動以過去 1 年全市場樣本重訓 LightGBM 權重。
 
 ### 💻 每日更新指令與排程設定
 
 ```bash
-# 【一鍵執行】每日收盤後全自動管線（抓取今日日 K ➔ 到期回填 ➔ 重新推論）
+# 【一鍵執行】每日收盤後全自動管線（日K抓取 ➔ 估值運算 ➔ 特徵寬表 ➔ 三引擎推論）
 ./scripts/run_daily_pipeline.sh
+
+# 【單獨運算】計算全市場自適應估值河流 (PE / PB / 高股息混合)
+./venv/bin/python scripts/calc_stock_valuation.py
+
+# 【單獨運算】組裝過去 300 個交易日多模態特徵寬表
+./venv/bin/python scripts/build_multimodal_features.py --days 300
 
 # 【單獨更新】增量補齊最近 5 天日 K 線
 ./venv/bin/python scripts/update_tw_daily_prices.py --days 5
 
-# 【單獨預測】為全市場所有股票執行最新預測推論
+# 【單獨預測】為全市場所有股票執行最新三引擎預測推論
 ./venv/bin/python scripts/run_tw_predictions.py --mode daily
 
-# 【測試單股】針對特定個股單獨執行預測 (例如台積電 2330、鴻海 2317)
-./venv/bin/python scripts/run_tw_predictions.py --mode daily --symbols 2330,2317
+# 【模型重訓】以過去 1 年全市場樣本重訓 LightGBM 殘差修正器 (models/lgbm_alpha_corrector.pkl)
+./venv/bin/python scripts/run_tw_predictions.py --mode train-lgbm
 
-# 【歷史回填】重新回填歷史 35 天之回測基準（用於初次部署建置資料）
-./venv/bin/python scripts/run_tw_predictions.py --mode backfill --backtest-days 35
+# 【歷史回填】重新回填歷史 35 天無未來函數洩漏之回測基準
+./venv/bin/python scripts/run_tw_predictions.py --mode backfill --days 35
 ```
 
 > [!TIP]
 > **排程建議 (Crontab)**：
-> 若在本地或常駐機器上運行，可設定每日週一至週五 14:40 自動執行：
+> 詳見 `scripts/crontab.example`，可於週一至週五盤後執行 `update` (14:35) 與 `predict` (14:40)，並於每週六 10:00 自動執行 `retrain`：
 > ```cron
-> 40 14 * * 1-5 cd /path/to/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh >> /tmp/pipeline.log 2>&1
+> 35 14 * * 1-5 cd /path/to/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh update >> /tmp/tw_update.log 2>&1
+> 40 14 * * 1-5 cd /path/to/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh predict >> /tmp/tw_predict.log 2>&1
+> 0 10 * * 6 cd /path/to/TW_Stock-Health-Check && ./scripts/run_daily_pipeline.sh retrain >> /tmp/tw_retrain.log 2>&1
 > ```
 
 > [!TIP]
