@@ -8,7 +8,7 @@ import {
   writeDailyCache,
 } from '../utils/tradingHours';
 
-export const getPredictionCacheKey = (stockId: string) => `stock_prediction_v3:${stockId}`;
+export const getPredictionCacheKey = (stockId: string) => `stock_prediction_v5:${stockId}`;
 
 function hasDuplicateDates(items?: Array<{ date: string }>): boolean {
   if (!items || items.length <= 1) return false;
@@ -42,9 +42,9 @@ export const useStockPrediction = (stockId: string) => {
       }
       return payload;
     },
-    // 若快取中的基準日已經比目前交易日時段舊，或含重複日期，則不將其當作 initialData，強迫向後端拉取
+    // 若快取中的基準日已經比目前交易日時段舊、缺 V3.4 五模式資料或含重複日期，則向後端重新拉取
     initialData: () => {
-      if (!cached?.data) return undefined;
+      if (!cached?.data || !cached.data.modes) return undefined;
       const cachedDate = cached.data.last_updated;
       const bucketDateMatch = bucket.match(/TW:(\d{4}-\d{2}-\d{2})/);
       if (bucketDateMatch && cachedDate && cachedDate < bucketDateMatch[1]) {

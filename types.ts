@@ -475,15 +475,72 @@ export interface FutureForecastPoint {
   expected_return_pct: number;
 }
 
+export interface StockValuationInfo {
+  method: string;
+  cheap_price: number;
+  fair_price: number;
+  expensive_price: number;
+  current_zone: 'cheap' | 'fair_low' | 'fair_high' | 'expensive' | string;
+  zone_label: string;
+  distance_to_fair_pct: number;
+}
+
+export interface PredictionDriverFactor {
+  type: 'positive' | 'negative' | 'neutral';
+  label: string;
+}
+
+export interface PredictionRiskAlert {
+  is_high_volatility: boolean;
+  message: string | null;
+}
+
+export type PredictionMode =
+  | 'ensemble_all'
+  | 'ensemble_tech'
+  | 'single_kronos'
+  | 'single_timesfm'
+  | 'single_lgbm';
+
+export interface PredictionModePayload {
+  kpis: StockPredictionKPIs;
+  kpis_t1: StockPredictionKPIs;
+  historical_backtest: HistoricalBacktestPoint[];
+  historical_backtest_t1: HistoricalBacktestPoint[];
+  future_forecast: FutureForecastPoint[];
+}
+
+export interface PredictionConsensusHorizon {
+  status: 'aligned_bull' | 'aligned_bear' | 'tech_bear_fund_bull' | 'mixed' | string;
+  badge_type: 'resonance' | 'divergence_bull_fund' | 'none' | string;
+  label: string | null;
+  directions: {
+    kronos: number;
+    timesfm: number;
+    lgbm: number;
+    ensemble_tech: number;
+  };
+}
+
+export interface PredictionConsensusInfo {
+  t5: PredictionConsensusHorizon;
+  t1: PredictionConsensusHorizon;
+}
+
 export interface StockPredictionData {
   symbol: string;
   name: string;
   currency: string;
   last_updated: string;
   base_close?: number;
+  valuation?: StockValuationInfo | null;
+  driver_factors?: PredictionDriverFactor[];
+  risk_alert?: PredictionRiskAlert | null;
   kpis: StockPredictionKPIs;
   kpis_t1?: StockPredictionKPIs;
   historical_backtest_t1?: HistoricalBacktestPoint[];
   historical_backtest: HistoricalBacktestPoint[];
   future_forecast: FutureForecastPoint[];
+  modes?: Record<PredictionMode, PredictionModePayload>;
+  consensus?: PredictionConsensusInfo | null;
 }
