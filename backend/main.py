@@ -18,9 +18,12 @@ else:
 # Create DB tables
 models.Base.metadata.create_all(bind=database.engine)
 
-# Auto-migration for shares_outstanding column in market_cap_cache
+# Auto-migration for shares_outstanding column & V3.4 five-mode prediction tables
 def upgrade_db_schema():
     from sqlalchemy import text
+    from .services.prediction_service import ensure_prediction_schema
+
+    ensure_prediction_schema(database.engine)
     db = database.SessionLocal()
     try:
         # Check if shares_outstanding column exists in market_cap_cache

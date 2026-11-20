@@ -22,11 +22,58 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .. import models
+
+PREDICTION_MODES: Tuple[str, ...] = (
+    "ensemble_all",
+    "ensemble_tech",
+    "single_kronos",
+    "single_timesfm",
+    "single_lgbm",
+)
+
+MODE_COLUMN_MAP: Dict[str, Tuple[str, str, str]] = {
+    "ensemble_all": ("pred_p10", "pred_p50", "pred_p90"),
+    "ensemble_tech": ("tech_p10", "tech_p50", "tech_p90"),
+    "single_kronos": ("kronos_p10", "kronos_p50", "kronos_p90"),
+    "single_timesfm": ("timesfm_p10", "timesfm_p50", "timesfm_p90"),
+    "single_lgbm": ("lgbm_p10", "lgbm_p50", "lgbm_p90"),
+}
+
+_PREDICTION_EXTRA_COLS: Tuple[str, ...] = (
+    "tech_p10",
+    "tech_p50",
+    "tech_p90",
+    "kronos_p10",
+    "kronos_p50",
+    "kronos_p90",
+    "timesfm_p10",
+    "timesfm_p50",
+    "timesfm_p90",
+    "lgbm_p10",
+    "lgbm_p50",
+    "lgbm_p90",
+)
+
+
+def ensure_prediction_schema(engine) -> None:
+    """冪等自動遷移：確保 stock_predictions 與 prediction_backtest_summary 支援 V3.4 五模式欄位。"""
+    models.Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        pred_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(stock_predictions)")).fetchall()}
+        for col_name in _PREDICTION_EXTRA_COLS:
+            if col_name not in pred_cols:
+                conn.execute(text(f"ALTER TABLE stock_predictions ADD COLUMN {col_name} FLOAT"))
+
+        sum_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(prediction_backtest_summary)")).fetchall()}
+        if "mode" not in sum_cols:
+            conn.execute(text("DROP TABLE prediction_backtest_summary"))
+
+    models.PredictionBacktestSummary.__table__.create(bind=engine, checkfirst=True)
 
 # ── TWSE (XTAI) 官方休市日曆 (2024–2027 國定假日與颱風休市) ─────────────────
 TWSE_NON_WEEKEND_HOLIDAYS = {
@@ -384,20 +431,29 @@ class DualModelForecaster:
         predict_date: str,
         ohlcv_df: pd.DataFrame,
         horizon: int = 5,
+        covariates: Optional[Dict[str, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        輸入過去最多 512 個交易日的 Close 序列，使用多尺度 Patch 與經驗分位數頭
-        產生未來 5 個交易日的 0.1 / 0.5 / 0.9 分位數預測值。
+        輸入過去最多 512 個交易日的 Close 序列與動態外生協變量 (taiex_ret_5d, foreign_net_vol_ratio_5d)，
+        使用多尺度 Patch 與經驗分位數頭產生未來 5 個交易日的 0.1 / 0.5 / 0.9 分位數預測值。
         """
         win = ohlcv_df.tail(512)
         closes = win["close"].to_numpy(dtype=np.float64)
 
+        cov = covariates or {}
+        taiex_r5 = float(cov.get("taiex_ret_5d") or 0.0)
+        foreign_r5 = float(cov.get("foreign_net_vol_ratio_5d") or 0.0)
+        # 受控外生特徵飄移修正（大盤近 5 日動能 + 外資近 5 日成交量佔比），消除純價格模型相位延遲
+        cov_daily_bias = float(np.clip(0.00018 * taiex_r5 + 0.008 * foreign_r5, -0.0025, 0.0025))
+
         if self._timesfm_model is not None and len(closes) >= 64:
             try:
                 point_fc, quantile_fc = self._timesfm_model.forecast(horizon=horizon, inputs=[closes])
-                q10 = np.asarray(quantile_fc[0, :horizon, 1], dtype=np.float64)
-                q50 = np.asarray(point_fc[0, :horizon], dtype=np.float64)
-                q90 = np.asarray(quantile_fc[0, :horizon, 9], dtype=np.float64)
+                steps = np.arange(1, horizon + 1, dtype=np.float64)
+                cov_mult = np.exp(cov_daily_bias * np.power(0.85, steps - 1))
+                q10 = np.asarray(quantile_fc[0, :horizon, 1], dtype=np.float64) * cov_mult
+                q50 = np.asarray(point_fc[0, :horizon], dtype=np.float64) * cov_mult
+                q90 = np.asarray(quantile_fc[0, :horizon, 9], dtype=np.float64) * cov_mult
                 return q10, q50, q90
             except Exception:
                 pass
@@ -420,7 +476,7 @@ class DualModelForecaster:
                 patch_slopes.append(slope * w)
         multi_scale_slope = sum(patch_slopes)
 
-        # 2. 阻尼線性趨勢 (Damped Holt Trend)
+        # 2. 阻尼線性趨勢 (Damped Holt Trend) + 動態協變量校正
         alpha, beta, phi = 0.20, 0.08, 0.85
         level = float(log_c[0])
         trend = 0.0
@@ -429,7 +485,7 @@ class DualModelForecaster:
             level = alpha * float(val) + (1.0 - alpha) * (level + phi * trend)
             trend = beta * (level - prev_level) + (1.0 - beta) * (phi * trend)
 
-        macro_drift = float(np.clip(0.45 * trend + 0.55 * multi_scale_slope, -0.009, 0.009))
+        macro_drift = float(np.clip(0.45 * trend + 0.55 * multi_scale_slope + cov_daily_bias, -0.011, 0.011))
 
         # 3. 原生經驗分位數預測頭：結合 60 日與 252 日真實 h 日分位數並套用非對稱波動擴張
         sigma_10 = float(np.std(log_rets[-10:])) if len(log_rets) >= 10 else float(np.std(log_rets))
@@ -501,41 +557,285 @@ def compute_dynamic_weights(
     return w_k, w_t
 
 
+def _clamp_ohlcv_step_row(
+    idx: int,
+    ref_price: float,
+    raw_p10: float,
+    raw_p50: float,
+    raw_p90: float,
+) -> Tuple[Dict[str, float], float]:
+    """套用台股 ±10% 法定漲跌幅邊界與 p10 <= p50 <= p90 排序保護。"""
+    limit_up = round(ref_price * 1.10, 2)
+    limit_down = round(max(0.01, ref_price * 0.90), 2)
+    p10 = round(min(max(raw_p10, limit_down), limit_up), 2)
+    p50 = round(min(max(raw_p50, limit_down), limit_up), 2)
+    p90 = round(min(max(raw_p90, limit_down), limit_up), 2)
+    p10, p50, p90 = sorted((p10, p50, p90))
+    return {"horizon": idx + 1, "pred_p10": p10, "pred_p50": p50, "pred_p90": p90}, p50
+
+
 def ensemble_and_clamp_tw(
     base_close: float,
     k_tuple: Tuple[np.ndarray, np.ndarray, np.ndarray],
     t_tuple: Tuple[np.ndarray, np.ndarray, np.ndarray],
     w_kronos: float,
     w_timesfm: float,
+    lgbm_deltas: Optional[Sequence[float]] = None,
+    atr_14_pct: Optional[float] = None,
 ) -> List[Dict[str, float]]:
-    """對 T+1 ~ T+5 執行融合加權平均，並逐日套用台股 ±10% 法定漲跌幅限制。"""
+    """
+    三引擎合成 + 動態 ATR 區間校準 + 台股 ±10% 法定漲跌幅限制：
+      P_final(t+h) = P_base(t+h) * (1 + clamp(Delta_r(t+h), -0.025, +0.025))
+    """
     k_p10, k_p50, k_p90 = k_tuple
     t_p10, t_p50, t_p90 = t_tuple
 
     ref_price = float(base_close)
+    atr_ratio = float(atr_14_pct) / 100.0 if (atr_14_pct is not None and atr_14_pct > 0) else 0.0
     rows: List[Dict[str, float]] = []
     for idx in range(len(k_p50)):
-        raw_p10 = w_kronos * float(k_p10[idx]) + w_timesfm * float(t_p10[idx])
-        raw_p50 = w_kronos * float(k_p50[idx]) + w_timesfm * float(t_p50[idx])
-        raw_p90 = w_kronos * float(k_p90[idx]) + w_timesfm * float(t_p90[idx])
+        base_p10 = w_kronos * float(k_p10[idx]) + w_timesfm * float(t_p10[idx])
+        base_p50 = w_kronos * float(k_p50[idx]) + w_timesfm * float(t_p50[idx])
+        base_p90 = w_kronos * float(k_p90[idx]) + w_timesfm * float(t_p90[idx])
 
-        limit_up = round(ref_price * 1.10, 2)
-        limit_down = round(max(0.01, ref_price * 0.90), 2)
+        delta_h = 0.0
+        if lgbm_deltas is not None and idx < len(lgbm_deltas):
+            delta_h = float(np.clip(lgbm_deltas[idx], -0.025, 0.025))
 
-        p10 = round(min(max(raw_p10, limit_down), limit_up), 2)
-        p50 = round(min(max(raw_p50, limit_down), limit_up), 2)
-        p90 = round(min(max(raw_p90, limit_down), limit_up), 2)
-        p10, p50, p90 = sorted((p10, p50, p90))
+        adj_p50 = base_p50 * (1.0 + delta_h)
+        shift = adj_p50 - base_p50
+        adj_p10 = base_p10 + shift
+        adj_p90 = base_p90 + shift
 
-        rows.append({
-            "horizon": idx + 1,
-            "pred_p10": p10,
-            "pred_p50": p50,
-            "pred_p90": p90,
-        })
-        ref_price = p50
+        # 動態 ATR 80% 信賴區間校正 (只擴寬，確保高波動個股覆蓋率 >= 80%)
+        if atr_ratio > 0 and adj_p50 > 0:
+            atr_half = adj_p50 * 1.2816 * atr_ratio * math.sqrt(idx + 1) * 1.05
+            low_hw = max(adj_p50 - adj_p10, atr_half)
+            high_hw = max(adj_p90 - adj_p50, atr_half)
+            adj_p10 = adj_p50 - low_hw
+            adj_p90 = adj_p50 + high_hw
+
+        row, ref_price = _clamp_ohlcv_step_row(idx, ref_price, adj_p10, adj_p50, adj_p90)
+        rows.append(row)
 
     return rows
+
+
+def clamp_single_model_tw(
+    base_close: float,
+    model_tuple: Tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> List[Dict[str, float]]:
+    """針對單一模型 (Kronos 或 TimesFM 2.5) 軌跡套用台股逐日 ±10% 漲跌停限制與分位排序。"""
+    m_p10, m_p50, m_p90 = model_tuple
+    ref_price = float(base_close)
+    rows: List[Dict[str, float]] = []
+    for idx in range(len(m_p50)):
+        row, ref_price = _clamp_ohlcv_step_row(
+            idx, ref_price, float(m_p10[idx]), float(m_p50[idx]), float(m_p90[idx])
+        )
+        rows.append(row)
+    return rows
+
+
+def build_lgbm_only_trajectory(
+    base_close: float,
+    lgbm_deltas: Sequence[float],
+    atr_14_pct: Optional[float] = None,
+) -> List[Dict[str, float]]:
+    """
+    LightGBM 財報籌碼單模型軌跡：
+    完全不採納技術 K 線趨勢，純粹以基準日收盤價 P_T0 依線性步長套用對應天數之預期報酬率，
+    並以個股 atr_14_pct 生成 80% P10 / P90 區間與 ±10% 法定漲跌停截斷。
+    """
+    ref_price = float(base_close)
+    p0 = float(base_close)
+    atr_ratio = float(atr_14_pct) / 100.0 if (atr_14_pct is not None and atr_14_pct > 0) else 0.02
+    rows: List[Dict[str, float]] = []
+    for idx in range(5):
+        delta_h = float(np.clip(lgbm_deltas[idx], -0.025, 0.025)) if idx < len(lgbm_deltas) else 0.0
+        raw_p50 = p0 * (1.0 + delta_h)
+        half_w = max(raw_p50 * 1.2816 * atr_ratio * math.sqrt(idx + 1) * 1.05, 1e-4)
+        row, ref_price = _clamp_ohlcv_step_row(idx, ref_price, raw_p50 - half_w, raw_p50, raw_p50 + half_w)
+        rows.append(row)
+    return rows
+
+
+def build_risk_alert(
+    feature_row: Optional[Dict[str, Any]],
+    closes: Optional[Sequence[float]] = None,
+) -> Dict[str, Any]:
+    """依 ATR14%、20D 年化波動與近 5 日漲跌幅判斷是否觸發高波動風險提示。"""
+    if not feature_row and (not closes or len(closes) < 6):
+        return {"is_high_volatility": False, "message": None}
+
+    atr = float((feature_row or {}).get("atr_14_pct") or 0.0)
+    ann_vol = float((feature_row or {}).get("ann_vol_20d") or 0.0)
+    ret5 = 0.0
+    if closes is not None and len(closes) >= 6 and closes[-6] > 0:
+        ret5 = ((float(closes[-1]) - float(closes[-6])) / float(closes[-6])) * 100.0
+
+    reasons = []
+    if atr >= 4.5:
+        reasons.append(f"近 14 日 ATR 波動 {atr:.1f}%")
+    if ann_vol >= 45.0:
+        reasons.append(f"20 日年化波動 {ann_vol:.1f}%")
+    if abs(ret5) >= 15.0:
+        reasons.append(f"近 5 日波幅 {ret5:+.1f}%")
+
+    if reasons:
+        return {
+            "is_high_volatility": True,
+            "message": f"{'、'.join(reasons)}，屬高波動交易區間，系統已動態擴寬 P10~P90 風險區間。",
+        }
+    return {"is_high_volatility": False, "message": None}
+
+
+def build_driver_factors(
+    feature_row: Optional[Dict[str, Any]],
+    deltas: Optional[Sequence[float]],
+    contrib_map: Optional[Dict[str, float]],
+    valuation: Optional[Dict[str, Any]],
+    valve_triggered: bool = False,
+    pre_valve_d5: float = 0.0,
+) -> List[Dict[str, str]]:
+    """依籌碼、財報基本面、估值位階與 LightGBM 特徵貢獻度生成 AI 歸因提示標籤 (2~4 條)。"""
+    factors: List[Dict[str, str]] = []
+    f = feature_row or {}
+    d5_pct = float(deltas[4]) * 100.0 if (deltas is not None and len(deltas) >= 5) else 0.0
+    cmap = contrib_map or {}
+
+    def _fmt_contrib(col_list: Sequence[str], fallback_pct: float) -> str:
+        c_val = sum(float(cmap.get(c, 0.0)) for c in col_list) * 100.0
+        val = c_val if abs(c_val) >= 0.05 else fallback_pct
+        return f"{val:+.2f}% 修正" if abs(val) >= 0.05 else "中性微調"
+
+    if valve_triggered and pre_valve_d5 > 1e-5:
+        factors.append({
+            "type": "negative",
+            "label": "🛡️ 風控閥啟動：法人5日賣超且跌破MA10，基本面正向加分已歸零",
+        })
+
+    trust_st = int(f.get("trust_streak_days") or 0)
+    foreign_st = int(f.get("foreign_streak_days") or 0)
+    inst_st = int(f.get("inst_streak_days") or 0)
+    t_rat = float(f.get("trust_net_vol_ratio_5d") or 0.0) * 100.0
+    f_rat = float(f.get("foreign_net_vol_ratio_5d") or 0.0) * 100.0
+
+    # 1. 籌碼動能歸因
+    if trust_st >= 2:
+        factors.append({
+            "type": "positive",
+            "label": f"📈 籌碼加分：投信連買 {trust_st} 日 ({_fmt_contrib(['trust_net_vol_ratio_5d'], d5_pct)})",
+        })
+    elif trust_st <= -2:
+        factors.append({
+            "type": "negative",
+            "label": f"⚠️ 籌碼調節：投信連賣 {abs(trust_st)} 日 ({_fmt_contrib(['trust_net_vol_ratio_5d'], d5_pct)})",
+        })
+    elif t_rat >= 0.8:
+        factors.append({
+            "type": "positive",
+            "label": f"📈 籌碼加分：投信近 5 日淨買佔量 +{t_rat:.1f}%",
+        })
+
+    if foreign_st >= 2:
+        factors.append({
+            "type": "positive",
+            "label": f"🌐 外資偏多：連買 {foreign_st} 日，近 5 日買超佔量 {f_rat:+.1f}%",
+        })
+    elif foreign_st <= -2:
+        factors.append({
+            "type": "negative",
+            "label": f"🌐 外資承壓：連賣 {abs(foreign_st)} 日，近 5 日賣超佔量 {f_rat:+.1f}%",
+        })
+    elif abs(f_rat) >= 2.0:
+        if f_rat > 0:
+            factors.append({"type": "positive", "label": f"🌐 外資買盤：近 5 日淨買超佔成交量 +{f_rat:.1f}%"})
+        else:
+            factors.append({"type": "negative", "label": f"🌐 外資調節：近 5 日淨賣超佔成交量 {f_rat:.1f}%"})
+    elif abs(inst_st) >= 2:
+        if inst_st > 0:
+            factors.append({"type": "positive", "label": f"📈 法人共振：三大法人連買 {inst_st} 日"})
+        else:
+            factors.append({"type": "negative", "label": f"⚠️ 法人調節：三大法人連賣 {abs(inst_st)} 日"})
+
+    # 2. 基本面營收與健檢歸因
+    rev_yoy = float(f.get("rev_yoy") or 0.0)
+    gm_qoq = float(f.get("gross_margin_qoq") or 0.0)
+    hs = float(f.get("health_score") or 50.0)
+
+    if rev_yoy >= 12.0:
+        factors.append({
+            "type": "positive",
+            "label": f"📊 基本面支撐：最新營收 YoY +{rev_yoy:.1f}%",
+        })
+    elif rev_yoy <= -12.0:
+        factors.append({
+            "type": "negative",
+            "label": f"📉 基本面承壓：最新營收 YoY {rev_yoy:.1f}%",
+        })
+    elif gm_qoq >= 1.5:
+        factors.append({
+            "type": "positive",
+            "label": f"📊 獲利改善：毛利率季增 +{gm_qoq:.1f} 個百分點",
+        })
+    elif hs >= 75.0:
+        factors.append({
+            "type": "positive",
+            "label": f"🛡️ 財報強健：基本面健檢總分 {hs:.0f} 分",
+        })
+
+    # 3. 估值位階與大盤環境
+    if valuation:
+        cz = valuation.get("current_zone")
+        dist = float(valuation.get("distance_to_fair_pct") or 0.0)
+        zlabel = valuation.get("zone_label") or ""
+        if cz == "cheap":
+            factors.append({
+                "type": "positive",
+                "label": f"💎 估值低估：落入便宜價區（距合理價 {dist:+.1f}%）",
+            })
+        elif cz == "expensive":
+            factors.append({
+                "type": "negative",
+                "label": f"🔥 估值偏高：進入昂貴價區（距合理價 {dist:+.1f}%）",
+            })
+        elif zlabel:
+            factors.append({
+                "type": "neutral",
+                "label": f"⚖️ 估值定位：{zlabel}（距合理價 {dist:+.1f}%）",
+            })
+
+    if len(factors) < 2:
+        tag_type = "positive" if d5_pct > 0.3 else "negative" if d5_pct < -0.3 else "neutral"
+        factors.append({
+            "type": tag_type,
+            "label": f"🤖 LightGBM 殘差綜合修正：T+5 {d5_pct:+.2f}%",
+        })
+
+    return factors[:4]
+
+
+def _bulk_upsert_prediction_meta(db: Session, rows: List[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    chunk_size = 75
+    for i in range(0, len(rows), chunk_size):
+        chunk = rows[i : i + chunk_size]
+        stmt = sqlite_insert(models.StockPredictionMeta).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["symbol", "market"],
+            set_={
+                "predict_date": stmt.excluded.predict_date,
+                "driver_factors_json": stmt.excluded.driver_factors_json,
+                "risk_alert_json": stmt.excluded.risk_alert_json,
+                "lgbm_delta_t1": stmt.excluded.lgbm_delta_t1,
+                "lgbm_delta_t5": stmt.excluded.lgbm_delta_t5,
+                "model_engine": stmt.excluded.model_engine,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        db.execute(stmt)
 
 
 # ── Component History Cache in ResponseCache (供日常模式反比權重計算) ─────────
@@ -545,7 +845,7 @@ def _save_component_cache(
     db: Session,
     entries: Dict[str, Dict[str, Any]],
 ) -> None:
-    """將每日每檔個股的個別模型 horizon=5 p50 快取至 ResponseCache 以便後續 daily 模式直接計算反比權重。"""
+    """將每日每檔個股的模型中間快取寫入 ResponseCache（分段寫入防止超過 SQLite 參數上限）。"""
     if not entries:
         return
     import time as _time
@@ -561,16 +861,19 @@ def _save_component_cache(
         }
         for k, v in entries.items()
     ]
-    stmt = sqlite_insert(models.ResponseCache).values(payload)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["cache_key"],
-        set_={
-            "response_data": stmt.excluded.response_data,
-            "created_at": stmt.excluded.created_at,
-            "expires_at": stmt.excluded.expires_at,
-        },
-    )
-    db.execute(stmt)
+    chunk_size = 150
+    for i in range(0, len(payload), chunk_size):
+        chunk = payload[i : i + chunk_size]
+        stmt = sqlite_insert(models.ResponseCache).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["cache_key"],
+            set_={
+                "response_data": stmt.excluded.response_data,
+                "created_at": stmt.excluded.created_at,
+                "expires_at": stmt.excluded.expires_at,
+            },
+        )
+        db.execute(stmt)
 
 
 def _load_component_map_for_symbols(db: Session, symbols: List[str]) -> Dict[str, Dict[str, float]]:
@@ -599,8 +902,8 @@ def _load_component_map_for_symbols(db: Session, symbols: List[str]) -> Dict[str
 def _bulk_upsert_predictions(db: Session, rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
-    # SQLite parameter limit ~999 -> chunk in batches of 75 rows (11 cols * 75 = 825 params)
-    chunk_size = 75
+    # 23 columns * 35 rows = 805 bind params (< 999 SQLite limit across all builds)
+    chunk_size = 35
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i : i + chunk_size]
         stmt = sqlite_insert(models.StockPrediction).values(chunk)
@@ -612,6 +915,18 @@ def _bulk_upsert_predictions(db: Session, rows: List[Dict[str, Any]]) -> None:
                 "pred_p10": stmt.excluded.pred_p10,
                 "pred_p50": stmt.excluded.pred_p50,
                 "pred_p90": stmt.excluded.pred_p90,
+                "tech_p10": stmt.excluded.tech_p10,
+                "tech_p50": stmt.excluded.tech_p50,
+                "tech_p90": stmt.excluded.tech_p90,
+                "kronos_p10": stmt.excluded.kronos_p10,
+                "kronos_p50": stmt.excluded.kronos_p50,
+                "kronos_p90": stmt.excluded.kronos_p90,
+                "timesfm_p10": stmt.excluded.timesfm_p10,
+                "timesfm_p50": stmt.excluded.timesfm_p50,
+                "timesfm_p90": stmt.excluded.timesfm_p90,
+                "lgbm_p10": stmt.excluded.lgbm_p10,
+                "lgbm_p50": stmt.excluded.lgbm_p50,
+                "lgbm_p90": stmt.excluded.lgbm_p90,
                 "actual_close": stmt.excluded.actual_close,
                 "model_weights": stmt.excluded.model_weights,
             },
@@ -622,12 +937,12 @@ def _bulk_upsert_predictions(db: Session, rows: List[Dict[str, Any]]) -> None:
 def _bulk_upsert_summaries(db: Session, rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
-    chunk_size = 100
+    chunk_size = 80
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i : i + chunk_size]
         stmt = sqlite_insert(models.PredictionBacktestSummary).values(chunk)
         stmt = stmt.on_conflict_do_update(
-            index_elements=["symbol", "market"],
+            index_elements=["symbol", "market", "mode"],
             set_={
                 "updated_at": stmt.excluded.updated_at,
                 "sample_count": stmt.excluded.sample_count,
@@ -681,8 +996,29 @@ def _sign_val(x: float) -> int:
     return 0
 
 
-def compute_summary_from_matured(matured_rows: List[models.StockPrediction]) -> Dict[str, Any]:
-    """依指定之已到期 horizon=5 紀錄計算方向勝率、MAPE 與 80% 區間覆蓋率。"""
+def _extract_mode_triplets(row: Any, mode: str) -> Tuple[float, float, float]:
+    """從 StockPrediction ORM 物件或 dict 萃取指定模式之 (p10, p50, p90)，若為 NULL 則安全回退 ensemble_all。"""
+    c10, c50, c90 = MODE_COLUMN_MAP.get(mode, ("pred_p10", "pred_p50", "pred_p90"))
+    if isinstance(row, dict):
+        v10 = row.get(c10)
+        v50 = row.get(c50)
+        v90 = row.get(c90)
+        if v10 is None or v50 is None or v90 is None:
+            v10, v50, v90 = row["pred_p10"], row["pred_p50"], row["pred_p90"]
+    else:
+        v10 = getattr(row, c10, None)
+        v50 = getattr(row, c50, None)
+        v90 = getattr(row, c90, None)
+        if v10 is None or v50 is None or v90 is None:
+            v10, v50, v90 = row.pred_p10, row.pred_p50, row.pred_p90
+    return float(v10), float(v50), float(v90)
+
+
+def compute_summary_from_matured(
+    matured_rows: Sequence[Any],
+    mode: str = "ensemble_all",
+) -> Dict[str, Any]:
+    """依指定模式與已到期紀錄計算方向勝率、MAPE 與 80% 區間覆蓋率。"""
     if not matured_rows:
         return {
             "sample_count": 0,
@@ -695,11 +1031,9 @@ def compute_summary_from_matured(matured_rows: List[models.StockPrediction]) -> 
     cov_hits = 0
     apes: List[float] = []
     for r in matured_rows:
-        act = float(r.actual_close)
-        base = float(r.base_close)
-        p50 = float(r.pred_p50)
-        p10 = float(r.pred_p10)
-        p90 = float(r.pred_p90)
+        act = float(r["actual_close"] if isinstance(r, dict) else r.actual_close)
+        base = float(r["base_close"] if isinstance(r, dict) else r.base_close)
+        p10, p50, p90 = _extract_mode_triplets(r, mode)
 
         if _sign_val(p50 - base) == _sign_val(act - base):
             dir_hits += 1
@@ -718,7 +1052,7 @@ def compute_summary_from_matured(matured_rows: List[models.StockPrediction]) -> 
 
 
 def recompute_backtest_summaries(db: Session, symbols: Optional[List[str]] = None) -> int:
-    """步驟 2 (重算 KPI)：針對每檔個股取近 30 筆已到期 horizon=5 紀錄更新 prediction_backtest_summary。"""
+    """步驟 2 (重算 KPI)：針對每檔個股與 5 種模式分別計算近 30 筆已到期 horizon=5 摘要。"""
     target_syms = symbols
     if not target_syms:
         target_syms = [
@@ -751,17 +1085,155 @@ def recompute_backtest_summaries(db: Session, symbols: Optional[List[str]] = Non
                 matured.append(r)
                 if len(matured) >= 30:
                     break
-        metrics = compute_summary_from_matured(matured)
-        summary_rows.append({
-            "symbol": sym,
-            "market": "TW",
-            "updated_at": now_str,
-            **metrics,
-        })
+
+        for mode in PREDICTION_MODES:
+            metrics = compute_summary_from_matured(matured, mode=mode)
+            summary_rows.append({
+                "symbol": sym,
+                "market": "TW",
+                "mode": mode,
+                "updated_at": now_str,
+                **metrics,
+            })
 
     _bulk_upsert_summaries(db, summary_rows)
     db.commit()
     return len(summary_rows)
+
+
+def _load_inst_net_5d_map(
+    db: Session,
+    ohlcv_map: Dict[str, pd.DataFrame],
+    symbols: Sequence[str],
+    min_date: Optional[str] = None,
+) -> Dict[Tuple[str, str], Optional[float]]:
+    """計算各個股每個交易日近 5 日三大法人合計淨買賣超（外資 + 投信 + 自營商）。"""
+    if not symbols:
+        return {}
+    raw_conn = db.connection().connection
+    cur = raw_conn.cursor()
+    sym_set = set(symbols)
+    chips_by_sym: Dict[str, Dict[str, float]] = {}
+
+    sql = "SELECT stock_id, date, foreign_net, trust_net, dealer_net FROM chips_daily"
+    if min_date:
+        lb = (date.fromisoformat(min_date) - timedelta(days=20)).isoformat()
+        cur.execute(sql + " WHERE date >= ?", (lb,))
+    else:
+        cur.execute(sql)
+
+    for sid, dt, fn, tn, dn in cur:
+        if sid in sym_set:
+            tot = float(fn or 0.0) + float(tn or 0.0) + float(dn or 0.0)
+            chips_by_sym.setdefault(sid, {})[str(dt)] = tot
+
+    out: Dict[Tuple[str, str], Optional[float]] = {}
+    for sym in symbols:
+        df = ohlcv_map.get(sym)
+        cdict = chips_by_sym.get(sym)
+        if df is None or not cdict:
+            continue
+        dates = df["date"].tolist()
+        for idx, dt_raw in enumerate(dates):
+            dt = str(dt_raw)
+            if min_date and dt < min_date:
+                continue
+            vals = [cdict[str(dates[k])] for k in range(max(0, idx - 4), idx + 1) if str(dates[k]) in cdict]
+            if vals:
+                out[(sym, dt)] = float(sum(vals))
+    return out
+
+
+def _load_cs_offset_cache(db: Session, dates: Sequence[str]) -> Dict[str, Tuple[float, float]]:
+    if not dates:
+        return {}
+    keys = [f"lgbm_cs_offset:{d}" for d in sorted(set(dates))]
+    out: Dict[str, Tuple[float, float]] = {}
+    chunk_size = 150
+    for i in range(0, len(keys), chunk_size):
+        chunk = keys[i : i + chunk_size]
+        rows = db.query(models.ResponseCache).filter(models.ResponseCache.cache_key.in_(chunk)).all()
+        for r in rows:
+            try:
+                obj = json.loads(r.response_data)
+                dt = r.cache_key.split(":", 1)[1]
+                out[dt] = (float(obj.get("c1", 0.0)), float(obj.get("c5", 0.0)))
+            except Exception:
+                continue
+    return out
+
+
+def _precompute_cross_sectional_deltas(
+    db: Session,
+    grouped_inputs: Dict[Tuple[str, str], List[Tuple[str, Dict[str, Any]]]],
+    oof_corrector: Any,
+    live_corrector: Any,
+) -> Tuple[Dict[Tuple[str, str], np.ndarray], Dict[str, Dict[str, float]]]:
+    """
+    依 (corrector_tag, predict_date) 對當日所有個股執行 LightGBM 橫截面去中心化與 ±2.5% 箝制，
+    保證每日市場平均殘差修正嚴格為 0.0，同時保存每日市場偏移量供單檔補建查詢使用。
+    """
+    from .lgbm_corrector import DELTA_MAX, DELTA_MIN, demean_and_clip_cross_section
+
+    deltas_map: Dict[Tuple[str, str], np.ndarray] = {}
+    cs_offsets_to_save: Dict[str, Dict[str, float]] = {}
+    all_dates = [dt for _, dt in grouped_inputs.keys()]
+    cached_offsets = _load_cs_offset_cache(db, all_dates)
+
+    # 先處理大橫截面 (n >= 20)，以便同一天若有少數停牌/缺資料個股亦可重用當日全市場偏移
+    ordered_groups = sorted(grouped_inputs.items(), key=lambda kv: -len(kv[1]))
+    for (tag, dt), items in ordered_groups:
+        corr = live_corrector if tag == "live" else oof_corrector
+        if corr is None or not items:
+            continue
+        syms_dt = [it[0] for it in items]
+        frows_dt = [it[1] for it in items]
+        raw_t1_arr, raw_t5_arr = corr.predict_raw_batch(frows_dt)
+
+        if len(items) >= 20:
+            map_d1, c1 = demean_and_clip_cross_section({s: float(v) for s, v in zip(syms_dt, raw_t1_arr)})
+            map_d5, c5 = demean_and_clip_cross_section({s: float(v) for s, v in zip(syms_dt, raw_t5_arr)})
+            cs_offsets_to_save[f"lgbm_cs_offset:{dt}"] = {"c1": float(c1), "c5": float(c5)}
+            cached_offsets[dt] = (float(c1), float(c5))
+            for s in syms_dt:
+                deltas_map[(s, dt)] = np.linspace(map_d1[s], map_d5[s], 5, dtype=np.float64)
+        else:
+            c1, c5 = cached_offsets.get(
+                dt,
+                (float(getattr(corr, "train_raw_mean_t1", 0.0)), float(getattr(corr, "train_raw_mean_t5", 0.0))),
+            )
+            for idx, s in enumerate(syms_dt):
+                d1 = float(np.clip(float(raw_t1_arr[idx]) - c1, DELTA_MIN, DELTA_MAX))
+                d5 = float(np.clip(float(raw_t5_arr[idx]) - c5, DELTA_MIN, DELTA_MAX))
+                deltas_map[(s, dt)] = np.linspace(d1, d5, 5, dtype=np.float64)
+
+    return deltas_map, cs_offsets_to_save
+
+
+def _load_valuation_map(db: Session, symbols: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+    from .valuation_service import format_valuation_payload
+
+    q = db.query(models.StockValuation)
+    if symbols:
+        q = q.filter(models.StockValuation.symbol.in_(symbols))
+    return {row.symbol: format_valuation_payload(row) for row in q.all()}
+
+
+def _compute_fallback_features_from_df(win_df: pd.DataFrame) -> Dict[str, Any]:
+    """當某檔個股尚未寫入 stock_multimodal_features 時，從價格視窗即時估算波動與風險特徵。"""
+    closes = win_df["close"].to_numpy(dtype=np.float64)
+    highs = win_df["high"].to_numpy(dtype=np.float64)
+    lows = win_df["low"].to_numpy(dtype=np.float64)
+    if len(closes) < 5:
+        return {"atr_14_pct": 2.0, "ann_vol_20d": 25.0}
+    prev_c = np.roll(closes, 1)
+    prev_c[0] = closes[0]
+    tr = np.maximum.reduce([highs - lows, np.abs(highs - prev_c), np.abs(lows - prev_c)])
+    atr14 = float(np.mean(tr[-14:]))
+    atr_pct = (atr14 / closes[-1]) * 100.0 if closes[-1] > 0 else 2.0
+    log_rets = np.diff(np.log(np.maximum(closes[-21:], 1e-6)))
+    ann_vol = float(np.std(log_rets) * math.sqrt(252.0) * 100.0) if len(log_rets) >= 2 else 25.0
+    return {"atr_14_pct": round(atr_pct, 3), "ann_vol_20d": round(ann_vol, 2)}
 
 
 # ── CLI 執行模式 1: 歷史 35 日滾動回測回填 (無未來函數洩漏) ──────────────────
@@ -773,24 +1245,110 @@ def run_historical_backfill(
     symbols: Optional[List[str]] = None,
     batch_size: int = 32,
     duckdb_path: Optional[str] = None,
+    retrain_lgbm: bool = True,
 ) -> Dict[str, Any]:
     """
     對過去 `days` 個交易日依時間序逐日推進模擬，嚴格截斷該日以後資料 (Zero Look-Ahead Bias)，
-    產生完整歷史預測軌跡、回填實際收盤價，並寫入滾動 30 日 KPI 快取表。
+    同步產出 5 種預測模式軌跡 (`ensemble_all`, `ensemble_tech`, `single_kronos`, `single_timesfm`, `single_lgbm`)，
+    套用 LightGBM 橫截面去中心化 + 法人賣超兼破 MA10 風控閥 + ±2.5% 箝制，
+    並更新滾動 30 日 5 模式 KPI 與 AI 歸因元數據。
     """
+    from collections import defaultdict
+    from .lgbm_corrector import (
+        DEFAULT_MODEL_PATH,
+        apply_chips_trend_valve,
+        load_alpha_corrector,
+        train_alpha_corrector,
+    )
+    from .multimodal_features import load_feature_history_map
+    from .valuation_service import compute_and_save_valuations
+
     ohlcv_map = load_ohlcv_from_source(db, symbols=symbols, duckdb_path=duckdb_path)
     eligible = [sym for sym, df in ohlcv_map.items() if len(df) >= 60]
     forecaster = get_forecaster()
 
+    if not eligible:
+        return {
+            "mode": "backfill",
+            "device": forecaster.device,
+            "days": days,
+            "processed_symbols": 0,
+            "prediction_rows_written": 0,
+        }
+
+    # 確保估值資料已存在
+    val_map = _load_valuation_map(db, symbols=eligible)
+    missing_val_syms = [s for s in eligible if s not in val_map]
+    if missing_val_syms:
+        compute_and_save_valuations(db, symbols=missing_val_syms)
+        val_map = _load_valuation_map(db, symbols=eligible)
+
+    # 估算回測區間起訖日以載入特徵寬表並訓練樣本外 LightGBM (嚴格 <= 最早回測起點)
+    start_dates = []
+    latest_dates = []
+    sym_date_windows: Dict[str, Tuple[int, int]] = {}
+    for sym in eligible:
+        d_col = ohlcv_map[sym]["date"]
+        n_b = len(d_col)
+        sim_c = min(days, max(1, n_b - 60))
+        start_i = n_b - sim_c
+        sym_date_windows[sym] = (start_i, n_b)
+        start_dates.append(str(d_col.iloc[start_i]))
+        latest_dates.append(str(d_col.iloc[-1]))
+    earliest_sim_date = min(start_dates)
+    latest_sim_date = max(latest_dates)
+
+    feat_hist_map = load_feature_history_map(db, symbols=eligible, min_date=earliest_sim_date)
+    inst_net_5d_map = _load_inst_net_5d_map(db, ohlcv_map, eligible, min_date=earliest_sim_date)
+
+    # 1. 回測期間使用嚴格切於 earliest_sim_date 之前的樣本外 LightGBM，防止未來函數洩漏
+    oof_corrector = None
+    live_corrector = load_alpha_corrector(DEFAULT_MODEL_PATH)
+    if retrain_lgbm or live_corrector is None:
+        oof_corrector = train_alpha_corrector(
+            db, cutoff_date=earliest_sim_date, lookback_days=220, save_to_disk=False
+        )
+        live_corrector = train_alpha_corrector(
+            db, cutoff_date=latest_sim_date, lookback_days=260, model_path=DEFAULT_MODEL_PATH, save_to_disk=True
+        )
+    if oof_corrector is None:
+        oof_corrector = live_corrector
+
+    # 2. 全市場橫截面預先去中心化與 ±2.5% 箝制（依交易日確保全市場修正均值嚴格 = 0）
+    grouped_inputs: Dict[Tuple[str, str], List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
+    for sym in eligible:
+        dates = ohlcv_map[sym]["date"].tolist()
+        start_i, n_b = sym_date_windows[sym]
+        for t_idx in range(start_i, n_b):
+            dt = str(dates[t_idx])
+            feat_row = feat_hist_map.get((sym, dt))
+            if feat_row is not None:
+                tag = "live" if (t_idx == n_b - 1) else "oof"
+                grouped_inputs[(tag, dt)].append((sym, feat_row))
+
+    deltas_map, cs_offsets_to_save = _precompute_cross_sectional_deltas(
+        db, grouped_inputs, oof_corrector=oof_corrector, live_corrector=live_corrector
+    )
+    if cs_offsets_to_save:
+        _save_component_cache(db, cs_offsets_to_save)
+        db.commit()
+
+    # 計算最新日去中心化驗證統計 (風控閥前/後均值與觸發數)
+    latest_pre_d5 = [float(deltas_map[(s, latest_sim_date)][4]) for s in eligible if (s, latest_sim_date) in deltas_map]
+    cs_mean_t5 = round(float(np.mean(latest_pre_d5)), 8) if latest_pre_d5 else 0.0
+
     total_pred_rows = 0
     processed_symbols = 0
+    valve_triggered_latest = 0
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    engine_tag = f"Kronos+TimesFM+{live_corrector.backend}" if live_corrector else "Kronos+TimesFM"
 
     for b_start in range(0, len(eligible), batch_size):
         batch_syms = eligible[b_start : b_start + batch_size]
         batch_pred_rows: List[Dict[str, Any]] = []
         batch_comp_entries: Dict[str, Dict[str, Any]] = {}
         batch_summaries: List[Dict[str, Any]] = []
+        batch_meta_rows: List[Dict[str, Any]] = []
 
         for sym in batch_syms:
             df = ohlcv_map[sym]
@@ -798,12 +1356,8 @@ def run_historical_backfill(
             closes = df["close"].tolist()
             actual_lookup = {str(d): round(float(c), 2) for d, c in zip(dates, closes)}
 
-            n_bars = len(df)
-            sim_count = min(days, max(1, n_bars - 60))
-            start_idx = n_bars - sim_count
+            start_idx, n_bars = sym_date_windows[sym]
 
-            # 嚴格依時間順序紀錄「僅在 t 時已知已到期」的個別模型誤差
-            # matured pool records: (target_date, k_ape5, t_ape5)
             pending_evals: List[Dict[str, Any]] = []
             matured_k_apes: List[float] = []
             matured_t_apes: List[float] = []
@@ -812,8 +1366,10 @@ def run_historical_backfill(
             for t_idx in range(start_idx, n_bars):
                 predict_date = str(dates[t_idx])
                 base_close = round(float(closes[t_idx]), 2)
+                raw_close_t0 = float(closes[t_idx])
+                ma10 = float(np.mean(closes[max(0, t_idx - 9) : t_idx + 1]))
+                is_latest_day = (t_idx == n_bars - 1)
 
-                # 先結算任何 target_date <= predict_date 的先前記錄 (絕不偷看未來)
                 still_pending: List[Dict[str, Any]] = []
                 for pev in pending_evals:
                     if pev["target_date"] <= predict_date:
@@ -825,17 +1381,45 @@ def run_historical_backfill(
                         still_pending.append(pev)
                 pending_evals = still_pending
 
-                # 計算動態反比誤差權重
                 w_k, w_t = compute_dynamic_weights(matured_k_apes, matured_t_apes)
                 weights_json = json.dumps({"kronos": round(w_k, 2), "timesfm": round(w_t, 2)})
 
-                # 嚴格截斷至 t_idx (含當日)，最多取 512 根 K 線
                 slice_start = max(0, t_idx - 511)
                 win_df = df.iloc[slice_start : t_idx + 1]
+                feat_row = feat_hist_map.get((sym, predict_date))
+
+                cov = (
+                    {
+                        "taiex_ret_5d": feat_row.get("taiex_ret_5d", 0.0),
+                        "foreign_net_vol_ratio_5d": feat_row.get("foreign_net_vol_ratio_5d", 0.0),
+                    }
+                    if feat_row
+                    else None
+                )
+
+                pre_valve_deltas = deltas_map.get((sym, predict_date), np.zeros(5, dtype=np.float64))
+                inst_5d = inst_net_5d_map.get((sym, predict_date))
+                valved_deltas, valve_triggered = apply_chips_trend_valve(
+                    pre_valve_deltas, inst_5d, raw_close_t0, ma10
+                )
+
+                eff_feat = feat_row if feat_row is not None else _compute_fallback_features_from_df(win_df)
+                atr_pct = eff_feat.get("atr_14_pct")
 
                 k_tuple = forecaster.predict_kronos_ohlcv(sym, predict_date, win_df, horizon=5, num_samples=20)
-                t_tuple = forecaster.predict_timesfm_close(sym, predict_date, win_df, horizon=5)
-                clamped_days = ensemble_and_clamp_tw(base_close, k_tuple, t_tuple, w_k, w_t)
+                t_tuple = forecaster.predict_timesfm_close(sym, predict_date, win_df, horizon=5, covariates=cov)
+
+                # 同步產生 5 種模式軌跡 (±10% 漲跌停截斷與 P10<=P50<=P90 保護)
+                ens_all_days = ensemble_and_clamp_tw(
+                    base_close, k_tuple, t_tuple, w_k, w_t, lgbm_deltas=valved_deltas, atr_14_pct=atr_pct
+                )
+                ens_tech_days = ensemble_and_clamp_tw(
+                    base_close, k_tuple, t_tuple, w_k, w_t, lgbm_deltas=None, atr_14_pct=atr_pct
+                )
+                kronos_days = clamp_single_model_tw(base_close, k_tuple)
+                timesfm_days = clamp_single_model_tw(base_close, t_tuple)
+                lgbm_days = build_lgbm_only_trajectory(base_close, valved_deltas, atr_14_pct=atr_pct)
+
                 target_dates = get_next_trading_days(predict_date, 5)
 
                 batch_comp_entries[f"pred_comp:{sym}:{predict_date}"] = {
@@ -849,65 +1433,100 @@ def run_historical_backfill(
                     "t_p50_h5": float(t_tuple[1][4]),
                 })
 
-                for day_item, t_date in zip(clamped_days, target_dates):
+                for idx_h, t_date in enumerate(target_dates):
                     act_val = actual_lookup.get(t_date)
+                    d_all = ens_all_days[idx_h]
+                    d_tech = ens_tech_days[idx_h]
+                    d_k = kronos_days[idx_h]
+                    d_t = timesfm_days[idx_h]
+                    d_l = lgbm_days[idx_h]
                     row_dict = {
                         "symbol": sym,
                         "market": "TW",
                         "predict_date": predict_date,
                         "target_date": t_date,
-                        "horizon": day_item["horizon"],
+                        "horizon": d_all["horizon"],
                         "base_close": base_close,
-                        "pred_p10": day_item["pred_p10"],
-                        "pred_p50": day_item["pred_p50"],
-                        "pred_p90": day_item["pred_p90"],
+                        "pred_p10": d_all["pred_p10"],
+                        "pred_p50": d_all["pred_p50"],
+                        "pred_p90": d_all["pred_p90"],
+                        "tech_p10": d_tech["pred_p10"],
+                        "tech_p50": d_tech["pred_p50"],
+                        "tech_p90": d_tech["pred_p90"],
+                        "kronos_p10": d_k["pred_p10"],
+                        "kronos_p50": d_k["pred_p50"],
+                        "kronos_p90": d_k["pred_p90"],
+                        "timesfm_p10": d_t["pred_p10"],
+                        "timesfm_p50": d_t["pred_p50"],
+                        "timesfm_p90": d_t["pred_p90"],
+                        "lgbm_p10": d_l["pred_p10"],
+                        "lgbm_p50": d_l["pred_p50"],
+                        "lgbm_p90": d_l["pred_p90"],
                         "actual_close": act_val,
                         "model_weights": weights_json,
                     }
                     batch_pred_rows.append(row_dict)
-                    if day_item["horizon"] == 5 and act_val is not None:
+                    if d_all["horizon"] == 5 and act_val is not None:
                         matured_h5_for_summary.append(row_dict)
 
-            # 取最後 30 筆已到期 horizon=5 計算 KPI 摘要
-            recent_30 = matured_h5_for_summary[-30:]
-            dir_hits = 0
-            cov_hits = 0
-            apes: List[float] = []
-            for mr in recent_30:
-                act = float(mr["actual_close"])
-                base = float(mr["base_close"])
-                p50 = float(mr["pred_p50"])
-                if _sign_val(p50 - base) == _sign_val(act - base):
-                    dir_hits += 1
-                if float(mr["pred_p10"]) <= act <= float(mr["pred_p90"]):
-                    cov_hits += 1
-                if act > 0:
-                    apes.append(abs(act - p50) / act * 100.0)
+                if is_latest_day:
+                    if valve_triggered and float(pre_valve_deltas[4]) > 1e-5:
+                        valve_triggered_latest += 1
+                    _, _, contrib_map = (
+                        live_corrector.predict_raw_and_contrib(feat_row)
+                        if (live_corrector is not None and feat_row is not None)
+                        else (0.0, 0.0, {})
+                    )
+                    sym_val = val_map.get(sym)
+                    drivers = build_driver_factors(
+                        eff_feat,
+                        valved_deltas,
+                        contrib_map,
+                        sym_val,
+                        valve_triggered=valve_triggered,
+                        pre_valve_d5=float(pre_valve_deltas[4]),
+                    )
+                    risk_al = build_risk_alert(eff_feat, win_df["close"].tolist())
+                    batch_meta_rows.append({
+                        "symbol": sym,
+                        "market": "TW",
+                        "predict_date": predict_date,
+                        "driver_factors_json": json.dumps(drivers, ensure_ascii=False),
+                        "risk_alert_json": json.dumps(risk_al, ensure_ascii=False),
+                        "lgbm_delta_t1": round(float(valved_deltas[0]), 5),
+                        "lgbm_delta_t5": round(float(valved_deltas[4]), 5),
+                        "model_engine": engine_tag,
+                        "updated_at": now_str,
+                    })
 
-            n_samples = len(recent_30)
-            batch_summaries.append({
-                "symbol": sym,
-                "market": "TW",
-                "updated_at": now_str,
-                "sample_count": n_samples,
-                "directional_accuracy": round((dir_hits / n_samples) * 100.0, 1) if n_samples else 0.0,
-                "mape": round(float(np.mean(apes)), 2) if apes else 0.0,
-                "interval_coverage": round((cov_hits / n_samples) * 100.0, 1) if n_samples else 0.0,
-            })
+            recent_30 = matured_h5_for_summary[-30:]
+            for mode in PREDICTION_MODES:
+                metrics = compute_summary_from_matured(recent_30, mode=mode)
+                batch_summaries.append({
+                    "symbol": sym,
+                    "market": "TW",
+                    "mode": mode,
+                    "updated_at": now_str,
+                    **metrics,
+                })
             processed_symbols += 1
 
         _bulk_upsert_predictions(db, batch_pred_rows)
         _save_component_cache(db, batch_comp_entries)
         _bulk_upsert_summaries(db, batch_summaries)
+        _bulk_upsert_prediction_meta(db, batch_meta_rows)
         db.commit()
         total_pred_rows += len(batch_pred_rows)
 
     return {
         "mode": "backfill",
         "device": forecaster.device,
+        "engine": engine_tag,
         "days": days,
         "processed_symbols": processed_symbols,
         "prediction_rows_written": total_pred_rows,
+        "lgbm_cs_mean_pre_valve_t5": cs_mean_t5,
+        "risk_valve_triggered_latest": valve_triggered_latest,
     }
 
 
@@ -919,35 +1538,75 @@ def run_daily_predictions(
     symbols: Optional[List[str]] = None,
     batch_size: int = 32,
     duckdb_path: Optional[str] = None,
+    retrain_lgbm: bool = False,
 ) -> Dict[str, Any]:
     """
-    日常盤後三步驟排程：
-      1. 回填最新實際收盤價至過往到期紀錄
-      2. 重算滾動 30 日回測 KPI 摘要
-      3. 讀取最新 512 日 K 線，依動態反比權重推論未來 5 日預測
+    日常盤後三引擎五模式排程：
+      1. 回填最新實際收盤價至過往到期紀錄，並重算 5 模式滾動 30 日回測 KPI 摘要
+      2. 更新個股自適應估值與載入最新多模態特徵
+      3. 全市場橫截面去中心化 + 法人/MA10 風控閥，執行 5 模式推論未來 5 日
+      4. 寫入預測明細與 AI 因子歸因 / 波動警示元數據
     """
+    from collections import defaultdict
+    from .lgbm_corrector import (
+        DEFAULT_MODEL_PATH,
+        apply_chips_trend_valve,
+        load_alpha_corrector,
+        train_alpha_corrector,
+    )
+    from .multimodal_features import load_latest_feature_map
+    from .valuation_service import compute_and_save_valuations
+
     ohlcv_map = load_ohlcv_from_source(db, symbols=symbols, duckdb_path=duckdb_path)
     eligible = [sym for sym, df in ohlcv_map.items() if len(df) >= 60]
 
-    # Step 1 & Step 2
     backfilled_actuals = backfill_actual_closes(db, symbols=eligible, ohlcv_map=ohlcv_map)
     recompute_backtest_summaries(db, symbols=eligible)
 
-    # 讀取過往各個股近 30 筆已到期預測的個別模型誤差
+    compute_and_save_valuations(db, symbols=eligible)
+    val_map = _load_valuation_map(db, symbols=eligible)
+    feat_map = load_latest_feature_map(db, symbols=eligible)
+    inst_net_5d_map = _load_inst_net_5d_map(db, ohlcv_map, eligible)
+
+    corrector = None if retrain_lgbm else load_alpha_corrector(DEFAULT_MODEL_PATH)
+    if corrector is None:
+        corrector = train_alpha_corrector(db, lookback_days=260, model_path=DEFAULT_MODEL_PATH, save_to_disk=True)
+
+    # 先按基準交易日執行全市場橫截面去中心化與 ±2.5% 箝制
+    grouped_inputs: Dict[Tuple[str, str], List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
+    for sym in eligible:
+        f_row = feat_map.get(sym)
+        if f_row is not None:
+            dt = str(ohlcv_map[sym]["date"].iloc[-1])
+            grouped_inputs[("live", dt)].append((sym, f_row))
+
+    deltas_map, cs_offsets_to_save = _precompute_cross_sectional_deltas(
+        db, grouped_inputs, oof_corrector=corrector, live_corrector=corrector
+    )
+    if cs_offsets_to_save:
+        _save_component_cache(db, cs_offsets_to_save)
+        db.commit()
+
     comp_map = _load_component_map_for_symbols(db, eligible)
     forecaster = get_forecaster()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    engine_tag = f"Kronos+TimesFM+{corrector.backend}" if corrector else "Kronos+TimesFM"
 
     total_new_rows = 0
+    valve_triggered_cnt = 0
     for b_start in range(0, len(eligible), batch_size):
         batch_syms = eligible[b_start : b_start + batch_size]
         batch_pred_rows: List[Dict[str, Any]] = []
         batch_comp_entries: Dict[str, Dict[str, Any]] = {}
+        batch_meta_rows: List[Dict[str, Any]] = []
 
         for sym in batch_syms:
             df = ohlcv_map[sym]
             win_df = df.tail(512)
             predict_date = str(win_df["date"].iloc[-1])
-            base_close = round(float(win_df["close"].iloc[-1]), 2)
+            raw_close_t0 = float(win_df["close"].iloc[-1])
+            base_close = round(raw_close_t0, 2)
+            ma10 = float(win_df["close"].tail(10).mean())
 
             matured_h5 = (
                 db.query(models.StockPrediction)
@@ -974,9 +1633,44 @@ def run_daily_predictions(
             w_k, w_t = compute_dynamic_weights(k_apes, t_apes)
             weights_json = json.dumps({"kronos": round(w_k, 2), "timesfm": round(w_t, 2)})
 
+            feat_row = feat_map.get(sym)
+            cov = (
+                {
+                    "taiex_ret_5d": feat_row.get("taiex_ret_5d", 0.0),
+                    "foreign_net_vol_ratio_5d": feat_row.get("foreign_net_vol_ratio_5d", 0.0),
+                }
+                if feat_row
+                else None
+            )
+            pre_valve_deltas = deltas_map.get((sym, predict_date), np.zeros(5, dtype=np.float64))
+            inst_5d = inst_net_5d_map.get((sym, predict_date))
+            valved_deltas, valve_triggered = apply_chips_trend_valve(
+                pre_valve_deltas, inst_5d, raw_close_t0, ma10
+            )
+            if valve_triggered and float(pre_valve_deltas[4]) > 1e-5:
+                valve_triggered_cnt += 1
+
+            _, _, contrib_map = (
+                corrector.predict_raw_and_contrib(feat_row)
+                if (corrector is not None and feat_row is not None)
+                else (0.0, 0.0, {})
+            )
+            eff_feat = feat_row if feat_row is not None else _compute_fallback_features_from_df(win_df)
+            atr_pct = eff_feat.get("atr_14_pct")
+
             k_tuple = forecaster.predict_kronos_ohlcv(sym, predict_date, win_df, horizon=5, num_samples=20)
-            t_tuple = forecaster.predict_timesfm_close(sym, predict_date, win_df, horizon=5)
-            clamped_days = ensemble_and_clamp_tw(base_close, k_tuple, t_tuple, w_k, w_t)
+            t_tuple = forecaster.predict_timesfm_close(sym, predict_date, win_df, horizon=5, covariates=cov)
+
+            ens_all_days = ensemble_and_clamp_tw(
+                base_close, k_tuple, t_tuple, w_k, w_t, lgbm_deltas=valved_deltas, atr_14_pct=atr_pct
+            )
+            ens_tech_days = ensemble_and_clamp_tw(
+                base_close, k_tuple, t_tuple, w_k, w_t, lgbm_deltas=None, atr_14_pct=atr_pct
+            )
+            kronos_days = clamp_single_model_tw(base_close, k_tuple)
+            timesfm_days = clamp_single_model_tw(base_close, t_tuple)
+            lgbm_days = build_lgbm_only_trajectory(base_close, valved_deltas, atr_14_pct=atr_pct)
+
             target_dates = get_next_trading_days(predict_date, 5)
 
             batch_comp_entries[f"pred_comp:{sym}:{predict_date}"] = {
@@ -986,32 +1680,74 @@ def run_daily_predictions(
             }
 
             actual_lookup = {str(d): round(float(c), 2) for d, c in zip(df["date"], df["close"])}
-            for day_item, t_date in zip(clamped_days, target_dates):
+            for idx_h, t_date in enumerate(target_dates):
+                d_all = ens_all_days[idx_h]
+                d_tech = ens_tech_days[idx_h]
+                d_k = kronos_days[idx_h]
+                d_t = timesfm_days[idx_h]
+                d_l = lgbm_days[idx_h]
                 batch_pred_rows.append({
                     "symbol": sym,
                     "market": "TW",
                     "predict_date": predict_date,
                     "target_date": t_date,
-                    "horizon": day_item["horizon"],
+                    "horizon": d_all["horizon"],
                     "base_close": base_close,
-                    "pred_p10": day_item["pred_p10"],
-                    "pred_p50": day_item["pred_p50"],
-                    "pred_p90": day_item["pred_p90"],
+                    "pred_p10": d_all["pred_p10"],
+                    "pred_p50": d_all["pred_p50"],
+                    "pred_p90": d_all["pred_p90"],
+                    "tech_p10": d_tech["pred_p10"],
+                    "tech_p50": d_tech["pred_p50"],
+                    "tech_p90": d_tech["pred_p90"],
+                    "kronos_p10": d_k["pred_p10"],
+                    "kronos_p50": d_k["pred_p50"],
+                    "kronos_p90": d_k["pred_p90"],
+                    "timesfm_p10": d_t["pred_p10"],
+                    "timesfm_p50": d_t["pred_p50"],
+                    "timesfm_p90": d_t["pred_p90"],
+                    "lgbm_p10": d_l["pred_p10"],
+                    "lgbm_p50": d_l["pred_p50"],
+                    "lgbm_p90": d_l["pred_p90"],
                     "actual_close": actual_lookup.get(t_date),
                     "model_weights": weights_json,
                 })
 
+            sym_val = val_map.get(sym)
+            drivers = build_driver_factors(
+                eff_feat,
+                valved_deltas,
+                contrib_map,
+                sym_val,
+                valve_triggered=valve_triggered,
+                pre_valve_d5=float(pre_valve_deltas[4]),
+            )
+            risk_al = build_risk_alert(eff_feat, win_df["close"].tolist())
+            batch_meta_rows.append({
+                "symbol": sym,
+                "market": "TW",
+                "predict_date": predict_date,
+                "driver_factors_json": json.dumps(drivers, ensure_ascii=False),
+                "risk_alert_json": json.dumps(risk_al, ensure_ascii=False),
+                "lgbm_delta_t1": round(float(valved_deltas[0]), 5),
+                "lgbm_delta_t5": round(float(valved_deltas[4]), 5),
+                "model_engine": engine_tag,
+                "updated_at": now_str,
+            })
+
         _bulk_upsert_predictions(db, batch_pred_rows)
         _save_component_cache(db, batch_comp_entries)
+        _bulk_upsert_prediction_meta(db, batch_meta_rows)
         db.commit()
         total_new_rows += len(batch_pred_rows)
 
     return {
         "mode": "daily",
         "device": forecaster.device,
+        "engine": engine_tag,
         "backfilled_actuals": backfilled_actuals,
         "processed_symbols": len(eligible),
         "prediction_rows_written": total_new_rows,
+        "risk_valve_triggered": valve_triggered_cnt,
     }
 
 
@@ -1020,9 +1756,11 @@ def run_daily_predictions(
 
 def get_stock_prediction(db: Session, symbol: str) -> Optional[Dict[str, Any]]:
     """
-    從本地 SQL 資料庫讀取預測明細與 30 日滾動回測摘要，零 AI 推論延遲。
+    從本地 SQL 資料庫讀取五模式預測明細、30 日滾動回測摘要、三引擎共識狀態、自適應估值與 AI 因子歸因，零 AI 推論延遲。
     若該個股尚未建立任何預測紀錄且具備至少 60 日價格歷史，自動觸發單檔 35 日補建。
     """
+    from .valuation_service import get_or_compute_valuation
+
     latest_row = (
         db.query(models.StockPrediction)
         .filter(models.StockPrediction.symbol == symbol, models.StockPrediction.market == "TW")
@@ -1034,7 +1772,7 @@ def get_stock_prediction(db: Session, symbol: str) -> Optional[Dict[str, Any]]:
         price_cnt = db.query(models.StockPriceDaily).filter_by(stock_id=symbol).count()
         if price_cnt < 60:
             return None
-        run_historical_backfill(db, days=35, symbols=[symbol], batch_size=1)
+        run_historical_backfill(db, days=35, symbols=[symbol], batch_size=1, retrain_lgbm=False)
         latest_row = (
             db.query(models.StockPrediction)
             .filter(models.StockPrediction.symbol == symbol, models.StockPrediction.market == "TW")
@@ -1047,11 +1785,41 @@ def get_stock_prediction(db: Session, symbol: str) -> Optional[Dict[str, Any]]:
     stock_meta = db.query(models.Stock).filter_by(stock_id=symbol).first()
     stock_name = stock_meta.name if stock_meta and stock_meta.name else symbol
 
-    summary = (
+    summary_rows = (
         db.query(models.PredictionBacktestSummary)
+        .filter_by(symbol=symbol, market="TW")
+        .all()
+    )
+    summary_by_mode: Dict[str, models.PredictionBacktestSummary] = {
+        str(getattr(r, "mode", "ensemble_all") or "ensemble_all"): r for r in summary_rows
+    }
+
+    valuation = get_or_compute_valuation(db, symbol)
+
+    pred_meta = (
+        db.query(models.StockPredictionMeta)
         .filter_by(symbol=symbol, market="TW")
         .first()
     )
+    driver_factors: List[Dict[str, str]] = []
+    risk_alert: Dict[str, Any] = {"is_high_volatility": False, "message": None}
+
+    if pred_meta is not None:
+        try:
+            driver_factors = json.loads(pred_meta.driver_factors_json)
+        except Exception:
+            driver_factors = []
+        try:
+            risk_alert = json.loads(pred_meta.risk_alert_json)
+        except Exception:
+            risk_alert = {"is_high_volatility": False, "message": None}
+    else:
+        from .multimodal_features import load_latest_feature_map
+
+        fmap = load_latest_feature_map(db, symbols=[symbol])
+        f_row = fmap.get(symbol)
+        driver_factors = build_driver_factors(f_row, None, None, valuation)
+        risk_alert = build_risk_alert(f_row, None)
 
     future_rows = (
         db.query(models.StockPrediction)
@@ -1088,78 +1856,135 @@ def get_stock_prediction(db: Session, symbol: str) -> Optional[Dict[str, Any]]:
         return list(reversed(unique_rows))
 
     matured_asc = _matured_for(5)
+    matured_t1 = _matured_for(1)
 
     try:
         weights_dict = json.loads(latest_row.model_weights)
     except Exception:
         weights_dict = {"kronos": 0.6, "timesfm": 0.4}
 
-    if summary:
-        kpi_block = {
-            "sample_count": int(summary.sample_count),
-            "directional_accuracy": round(float(summary.directional_accuracy), 1),
-            "mape": round(float(summary.mape), 2),
-            "interval_coverage": round(float(summary.interval_coverage), 1),
-            "model_weights": weights_dict,
-        }
-    else:
-        fallback_metrics = compute_summary_from_matured(matured_asc)
-        kpi_block = {**fallback_metrics, "model_weights": weights_dict}
-
-    def _bt_points(rows):
-        return [
-            {
+    def _bt_points_for(rows: Sequence[models.StockPrediction], mode: str) -> List[Dict[str, Any]]:
+        pts: List[Dict[str, Any]] = []
+        for r in rows:
+            p10, p50, p90 = _extract_mode_triplets(r, mode)
+            pts.append({
                 "date": r.target_date,
                 "predict_date": r.predict_date,
                 "base_close": round(float(r.base_close), 2),
                 "actual_close": round(float(r.actual_close), 2),
-                "predicted_close_5d_ago": round(float(r.pred_p50), 2),
-                "pred_p10_5d_ago": round(float(r.pred_p10), 2),
-                "pred_p90_5d_ago": round(float(r.pred_p90), 2),
+                "predicted_close_5d_ago": round(p50, 2),
+                "pred_p10_5d_ago": round(p10, 2),
+                "pred_p90_5d_ago": round(p90, 2),
+            })
+        return pts
+
+    def _future_points_for(rows: Sequence[models.StockPrediction], mode: str) -> List[Dict[str, Any]]:
+        f_pts: List[Dict[str, Any]] = []
+        for r in rows:
+            base_c = float(r.base_close)
+            p10_c, p50_c, p90_c = _extract_mode_triplets(r, mode)
+            ret_pct = round(((p50_c - base_c) / base_c) * 100.0, 2) if base_c > 0 else 0.0
+            f_pts.append({
+                "horizon": int(r.horizon),
+                "target_date": r.target_date,
+                "pred_p10": round(p10_c, 2),
+                "pred_p50": round(p50_c, 2),
+                "pred_p90": round(p90_c, 2),
+                "expected_return_pct": ret_pct,
+            })
+        return f_pts
+
+    modes_payload: Dict[str, Dict[str, Any]] = {}
+    for mode in PREDICTION_MODES:
+        sum_row = summary_by_mode.get(mode)
+        if sum_row is not None and (int(sum_row.sample_count) > 0 or not matured_asc):
+            kpi_block = {
+                "sample_count": int(sum_row.sample_count),
+                "directional_accuracy": round(float(sum_row.directional_accuracy), 1),
+                "mape": round(float(sum_row.mape), 2),
+                "interval_coverage": round(float(sum_row.interval_coverage), 1),
+                "model_weights": weights_dict,
             }
-            for r in rows
-        ]
+        else:
+            kpi_block = {**compute_summary_from_matured(matured_asc, mode=mode), "model_weights": weights_dict}
 
-    matured_t1 = _matured_for(1)
-    kpis_t1 = {**compute_summary_from_matured(matured_t1), "model_weights": weights_dict}
-    historical_backtest_t1 = _bt_points(matured_t1)
-
-    historical_backtest = [
-        {
-            "date": r.target_date,
-            "predict_date": r.predict_date,
-            "base_close": round(float(r.base_close), 2),
-            "actual_close": round(float(r.actual_close), 2),
-            "predicted_close_5d_ago": round(float(r.pred_p50), 2),
-            "pred_p10_5d_ago": round(float(r.pred_p10), 2),
-            "pred_p90_5d_ago": round(float(r.pred_p90), 2),
+        kpis_t1 = {**compute_summary_from_matured(matured_t1, mode=mode), "model_weights": weights_dict}
+        modes_payload[mode] = {
+            "kpis": kpi_block,
+            "kpis_t1": kpis_t1,
+            "historical_backtest": _bt_points_for(matured_asc, mode),
+            "historical_backtest_t1": _bt_points_for(matured_t1, mode),
+            "future_forecast": _future_points_for(future_rows, mode),
         }
-        for r in matured_asc
-    ]
 
-    future_forecast = []
-    for r in future_rows:
-        base_c = float(r.base_close)
-        p50_c = float(r.pred_p50)
-        ret_pct = round(((p50_c - base_c) / base_c) * 100.0, 2) if base_c > 0 else 0.0
-        future_forecast.append({
-            "horizon": int(r.horizon),
-            "target_date": r.target_date,
-            "pred_p10": round(float(r.pred_p10), 2),
-            "pred_p50": round(p50_c, 2),
-            "pred_p90": round(float(r.pred_p90), 2),
-            "expected_return_pct": ret_pct,
-        })
+    # 三引擎共識度比對 (Kronos vs TimesFM 2.5 vs LightGBM)
+    row_by_h = {int(r.horizon): r for r in future_rows}
 
+    def _build_horizon_consensus(h: int) -> Dict[str, Any]:
+        row = row_by_h.get(h)
+        if row is None:
+            return {
+                "status": "mixed",
+                "badge_type": "none",
+                "label": None,
+                "directions": {"kronos": 0, "timesfm": 0, "lgbm": 0, "ensemble_tech": 0},
+            }
+        base_c = float(row.base_close)
+        _, pk, _ = _extract_mode_triplets(row, "single_kronos")
+        _, pt, _ = _extract_mode_triplets(row, "single_timesfm")
+        _, pl, _ = _extract_mode_triplets(row, "single_lgbm")
+        _, ptech, _ = _extract_mode_triplets(row, "ensemble_tech")
+
+        dk = _sign_val(pk - base_c)
+        dt = _sign_val(pt - base_c)
+        dl = _sign_val(pl - base_c)
+        dtech = _sign_val(ptech - base_c)
+
+        if dk != 0 and dk == dt == dl:
+            status = "aligned_bull" if dk > 0 else "aligned_bear"
+            badge_type = "resonance"
+            label = "🔥 三引擎多空共振一致"
+        elif ((dk < 0 and dt < 0) or (dtech < 0 and (dk < 0 or dt < 0))) and dl > 0:
+            status = "tech_bear_fund_bull"
+            badge_type = "divergence_bull_fund"
+            label = "⚡ 技術偏空 vs. 基本面籌碼偏多（短線承壓、基本面有撐）"
+        else:
+            status = "mixed"
+            badge_type = "none"
+            label = None
+
+        return {
+            "status": status,
+            "badge_type": badge_type,
+            "label": label,
+            "directions": {
+                "kronos": dk,
+                "timesfm": dt,
+                "lgbm": dl,
+                "ensemble_tech": dtech,
+            },
+        }
+
+    consensus = {
+        "t5": _build_horizon_consensus(5),
+        "t1": _build_horizon_consensus(1),
+    }
+
+    default_mode = modes_payload["ensemble_all"]
     return {
         "symbol": symbol,
         "name": stock_name,
         "currency": "TWD",
         "last_updated": latest_row.predict_date,
         "base_close": round(float(latest_row.base_close), 2),
-        "kpis": kpi_block,
-        "kpis_t1": kpis_t1,
-        "historical_backtest_t1": historical_backtest_t1,
-        "historical_backtest": historical_backtest,
-        "future_forecast": future_forecast,
+        "valuation": valuation,
+        "driver_factors": driver_factors,
+        "risk_alert": risk_alert,
+        "kpis": default_mode["kpis"],
+        "kpis_t1": default_mode["kpis_t1"],
+        "historical_backtest_t1": default_mode["historical_backtest_t1"],
+        "historical_backtest": default_mode["historical_backtest"],
+        "future_forecast": default_mode["future_forecast"],
+        "modes": modes_payload,
+        "consensus": consensus,
     }

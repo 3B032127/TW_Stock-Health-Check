@@ -206,9 +206,26 @@ class StockPrediction(Base):
     target_date = Column(String(16), nullable=False, index=True)
     horizon = Column(Integer, nullable=False)
     base_close = Column(Float, nullable=False)
+    # ensemble_all (預設：三引擎全融合)
     pred_p10 = Column(Float, nullable=False)
     pred_p50 = Column(Float, nullable=False)
     pred_p90 = Column(Float, nullable=False)
+    # ensemble_tech (雙時序純技術面：Kronos + TimesFM)
+    tech_p10 = Column(Float, nullable=True)
+    tech_p50 = Column(Float, nullable=True)
+    tech_p90 = Column(Float, nullable=True)
+    # single_kronos (Kronos 單模型)
+    kronos_p10 = Column(Float, nullable=True)
+    kronos_p50 = Column(Float, nullable=True)
+    kronos_p90 = Column(Float, nullable=True)
+    # single_timesfm (TimesFM 2.5 單模型)
+    timesfm_p10 = Column(Float, nullable=True)
+    timesfm_p50 = Column(Float, nullable=True)
+    timesfm_p90 = Column(Float, nullable=True)
+    # single_lgbm (LightGBM 財報籌碼單模型)
+    lgbm_p10 = Column(Float, nullable=True)
+    lgbm_p50 = Column(Float, nullable=True)
+    lgbm_p90 = Column(Float, nullable=True)
     actual_close = Column(Float, nullable=True)
     model_weights = Column(String(64), nullable=False)
 
@@ -228,10 +245,105 @@ class PredictionBacktestSummary(Base):
 
     symbol = Column(String(16), primary_key=True)
     market = Column(String(8), primary_key=True, default="TW")
+    mode = Column(String(24), primary_key=True, default="ensemble_all")
     updated_at = Column(String(32), nullable=False)
     sample_count = Column(Integer, nullable=False)
     directional_accuracy = Column(Float, nullable=False)
     mape = Column(Float, nullable=False)
     interval_coverage = Column(Float, nullable=False)
+
+
+class StockValuation(Base):
+    __tablename__ = "stock_valuations"
+
+    symbol = Column(String(16), primary_key=True)
+    as_of_date = Column(String(16), nullable=False)
+    method = Column(String(64), nullable=False)
+    cheap_price = Column(Float, nullable=False)
+    fair_price = Column(Float, nullable=False)
+    expensive_price = Column(Float, nullable=False)
+    current_close = Column(Float, nullable=False)
+    current_zone = Column(String(32), nullable=False)
+    zone_label = Column(String(32), nullable=False)
+    distance_to_fair_pct = Column(Float, nullable=False)
+    pe_percentile_3y = Column(Float, nullable=True)
+    valuation_percentile = Column(Float, nullable=True)
+    ttm_eps = Column(Float, nullable=True)
+    bvps = Column(Float, nullable=True)
+    avg_div_yield_3y = Column(Float, nullable=True)
+    updated_at = Column(String(32), nullable=False)
+
+
+class StockMultimodalFeature(Base):
+    __tablename__ = "stock_multimodal_features"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    symbol = Column(String(16), nullable=False, index=True)
+    date = Column(String(16), nullable=False, index=True)
+    foreign_net_vol_ratio_5d = Column(Float, nullable=True)
+    trust_net_vol_ratio_5d = Column(Float, nullable=True)
+    margin_balance_chg_5d = Column(Float, nullable=True)
+    inst_streak_days = Column(Integer, nullable=True)
+    trust_streak_days = Column(Integer, nullable=True)
+    foreign_streak_days = Column(Integer, nullable=True)
+    rev_yoy = Column(Float, nullable=True)
+    rev_mom = Column(Float, nullable=True)
+    rev_momentum_3m_12m = Column(Float, nullable=True)
+    gross_margin_qoq = Column(Float, nullable=True)
+    pe_percentile_3y = Column(Float, nullable=True)
+    health_score = Column(Float, nullable=True)
+    valuation_percentile = Column(Float, nullable=True)
+    taiex_ret_5d = Column(Float, nullable=True)
+    atr_14_pct = Column(Float, nullable=True)
+    ann_vol_20d = Column(Float, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "date", name="uix_multimodal_features_sym_date"),
+    )
+
+
+class StockPredictionMeta(Base):
+    __tablename__ = "stock_prediction_meta"
+
+    symbol = Column(String(16), primary_key=True)
+    market = Column(String(8), primary_key=True, default="TW")
+    predict_date = Column(String(16), nullable=False)
+    driver_factors_json = Column(String, nullable=False)
+    risk_alert_json = Column(String, nullable=False)
+    lgbm_delta_t1 = Column(Float, nullable=True)
+    lgbm_delta_t5 = Column(Float, nullable=True)
+    model_engine = Column(String(64), nullable=False)
+    updated_at = Column(String(32), nullable=False)
+
+
+class MonthlyRevenue(Base):
+    __tablename__ = "monthly_revenues"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    stock_id = Column(String(16), nullable=False, index=True)
+    date = Column(String(16), nullable=False, index=True)
+    announcement_date = Column(String(16), nullable=False, index=True)
+    revenue = Column(BigInteger, nullable=False)
+    rev_yoy = Column(Float, nullable=True)
+    rev_mom = Column(Float, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("stock_id", "date", name="uix_monthly_revenues_stock_date"),
+    )
+
+
+class MarginTradingDaily(Base):
+    __tablename__ = "margin_trading_daily"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    stock_id = Column(String(16), nullable=False, index=True)
+    date = Column(String(16), nullable=False, index=True)
+    margin_balance = Column(BigInteger, nullable=True)
+    short_balance = Column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("stock_id", "date", name="uix_margin_trading_stock_date"),
+    )
+
 
 
